@@ -8,17 +8,45 @@ Created on Sun Oct 16 12:51:47 2016
 import numpy as np
 from scipy import spatial
 import math
+import scipy.sparse as sparse
 
-def check(v1,v2):
-    if len(v1) != len(v2):
+def check(v1,v2, is_sparse):
+    if not is_sparse and len(v1) != len(v2):
         raise ValueError( "Not maching lengths of ", v1, v2)
-    pass
       
-def dotProduct(v1, v2):
-    check(v1, v2)
-    return np.dot(v1, v2)
+        
+        
+def dotProduct(v1, v2, is_sparse):
+    check(v1, v2, is_sparse)
+    if is_sparse:
+        s = 0
+        if len(v1) > len(v2): # go over the smaller list
+            t = v1
+            v1 = v2
+            v2 = t
+            
+        for k in v1:
+            s += v1[k] * v2[k]
 
-def distance_cosine(a,b):
+        return s
+    else:
+        return np.dot(v1, v2)
+
+def distance_cosine(a,b, is_sparse):
+    if is_sparse:
+        m1 = max(a.values())
+        m2 = max(b.values())
+        m = max(m1, m2)
+        tmp = [0]*m
+        for k in a:
+            tmp[k] = a[k]
+        a = tmp
+
+        tmp = [0]*m
+        for k in b:
+            tmp[k] = b[k]
+        b = tmp
+        
     res = 1-spatial.distance.cosine(a, b)
     
     return res
@@ -39,21 +67,25 @@ class HashtableLSH:
     hyperPlanes = None
     buckets = None
     total = 0
+    is_sparse = False
     
     d = 0
     
-    def __init__(self, maxBucketSize, dimensionSize, hyperPlanesNumber):
+    def __init__(self, maxBucketSize, dimensionSize, hyperPlanesNumber, is_sparse=False):
         self.hyperPlanesNumber = hyperPlanesNumber
-        self.hyperPlanes = self.randomHyperPlanes( dimensionSize, hyperPlanesNumber)
         self.maxBucketSize = maxBucketSize
         self.buckets = {}
         self.total = 0
+        self.is_sparse = is_sparse
         self.d = hyperPlanesNumber
+        self.hyperPlanes = self.randomHyperPlanes( dimensionSize, hyperPlanesNumber)
+        
     
     def add(self, ID, point):
         self.total += 1
         
-        point = np.asarray(point)
+        if not self.is_sparse:
+            point = np.asarray(point)
         
         hashcode = self.generateHashCode(point)
 
@@ -67,7 +99,7 @@ class HashtableLSH:
         #search for closest item
         minDist = 1
         for k in b:
-            dist = distance_cosine(k['point'], point)
+            dist = distance_cosine(k['point'], point, self.is_sparse)
             if dist < minDist:
                 #k['similar_count'] += 1
                 #item['similar_count'] += 1
@@ -80,6 +112,7 @@ class HashtableLSH:
         
         if len(b) > self.maxBucketSize:
             b = b[1:]
+            self.total -= 1
         
         self.buckets[hashcode] = b
         
@@ -89,7 +122,7 @@ class HashtableLSH:
     def generateHashCode(self, point):
         hashcode = ''
         for hyperplane in self.hyperPlanes:
-            if(dotProduct(point, hyperplane) < 0):
+            if(dotProduct(point, hyperplane, self.is_sparse) < 0):
                 hashcode += '0'
             else:
                 hashcode += '1'
@@ -97,13 +130,24 @@ class HashtableLSH:
 
 
     def randomHyperPlanes(self, dimSize, hyperPlanesNumber):
-        planes = []
-        for i in range(hyperPlanesNumber):
-            v = np.random.normal(size = dimSize)
-            #v = v/np.sqrt(np.sum(v**2))
-            planes.append(v)
+#        planes = []
+#        for i in range(hyperPlanesNumber):
+#            v = np.random.normal(size = dimSize)
+#            #v = v/np.sqrt(np.sum(v**2))
+#            planes.append(v)
             
-        planes = np.random.randn(hyperPlanesNumber, dimSize)
+        if self.is_sparse:
+            m = min(dimSize/2, np.random.randint(100))
+            xr = range(dimSize)
+            planes = []
+            for i in range(hyperPlanesNumber):
+                tmp = np.random.choice(xr, size=m)
+                plane = {}
+                for t in tmp:
+                    plane[t] = 1
+                planes.append(plane)
+        else:
+            planes = np.random.randn(hyperPlanesNumber, dimSize)
         return planes
    
     def size(self):
@@ -123,9 +167,9 @@ class HashtableLSH:
         return 1-res
         
     def myprint(self):
-        print('total: ', self.total, 'max bucke size', self.maxBucketSize, 'hyperPlanesNumber', self.hyperPlanesNumber)
+        print('total: ', self.total, 'number of buckets:', len(self.buckets), 'max bucke size', self.maxBucketSize, 'hyperPlanesNumber', self.hyperPlanesNumber)
         lengths = [len(self.buckets[b]) for b in self.buckets]
-        print(lengths)
+        print('number of items in each bucket: ', lengths)
         #pprint.pprint(self.buckets)
      
 class LSH:
@@ -133,26 +177,38 @@ class LSH:
     dimSize = 3
     numberTables = None
     hList = None
+    is_sparse = None
     nearestNeighbor = {}
 
-    def __init__(self, dimensionSize ,hyperPlanesNumber=40, numberTables=4, maxBucketSize=10):
+    def __init__(self, dimensionSize ,hyperPlanesNumber=40, numberTables=4, maxBucketSize=10, is_sparse=False):
+        self.is_sparse = is_sparse
         self.dimSize = dimensionSize
         self.numberTables = numberTables
-        self.hList = [HashtableLSH(maxBucketSize, dimensionSize, hyperPlanesNumber) for i in range(numberTables)]
+        self.hList = [HashtableLSH(maxBucketSize, dimensionSize, hyperPlanesNumber, is_sparse=self.is_sparse) for i in range(numberTables)]
 
     def myprint(self):
         for h in self.hList:
+            print('*******************************************')
             h.myprint()
-        print('dimenion: ', self.dimSize, 'tabels:', self.numberTables, self.hList[0].size() )
+        print('dimenion: ', self.dimSize, 'tables:', self.numberTables, self.hList[0].size() )
             
+    
     def add(self, ID, point):
+        """add a point to the hash table
+        the format of the point is assumed to be parse so it will be in libSVM format
+        json {word:count, word:cout}"""
         for table in self.hList:
             table.add(ID, point)
         
 
     def distance(self, p1, p2):
-        i = np.random.randint( len(self.hList) )
-        return self.hList[i].distance_aprox(p1, p2)
+        dmin = None
+        for h in self.hList:
+            d = h.distance_aprox(p1, p2)
+            if dmin == None or dmin>d:
+                dmin = d
+                
+        return dmin
         
     def hash_similarity(self, p1, p2):
         return 1-self.distance(p1, p2)
@@ -162,8 +218,9 @@ class LSH:
         avg = 0
         
         for run in range(nruns):
-            p1 = np.random.randn(self.dimSize)
-            p2 = np.random.randn(self.dimSize)        
+            if not self.is_sparse:
+                p1 = np.random.randn(self.dimSize)
+                p2 = np.random.randn(self.dimSize)        
             
             hash_sim = self.hash_similarity(p1, p2) 
             true_sim = angular_similarity(p1, p2)
@@ -171,60 +228,106 @@ class LSH:
             avg += diff
             print ('true %.4f, hash %.4f, diff %.4f' % (true_sim, hash_sim, diff) )
         print ('avg diff' , avg / nruns)
+   
+#%%        
         
-        
+def test1():
+    n = 5
+    d = 2**n
+    dim = 3
+    maxB = 50
+    tables = 10
+    ll = LSH(dimensionSize=dim, numberTables=tables, hyperPlanesNumber=d, maxBucketSize=maxB)
+   
+    ID = 1
+
+    nruns = 100
+    mu, sigma = 3, 0.1 # mean and standard deviation
+    
+    for run in range(nruns):
+        p = np.random.randn(dim)
+        #p = np.random.normal(mu, sigma, dim)
+        ll.add(ID, p)
+        ID += 1
+        perc = 100.0*run/nruns
+        if perc % 10 == 0:
+            print '%.2f' % perc, '%'
+
+            
+    
+    ll.myprint()
+
+    
+    sss = ll.hList[4]
+    bbb = sss.buckets
+    
+    s = 0
+    for b in bbb:
+        s += len( bbb[b ])
+    print s
+    
+    s = 0 
+    for x in bbb.values():
+        s += len(x)
+    print s
+    
+    
+    print('total: ', sss.total, 'number of buckets:', len(sss.buckets), ' max bucke size', sss.maxBucketSize, 'hyperPlanesNumber', sss.hyperPlanesNumber)
+    lengths = [len(sss.buckets[b]) for b in sss.buckets]
+    print('number of items in each bucket: ', lengths)
+    
+    
+    ll.evaluate(nruns)
+
+    #
+    #p1 = [2.88844345,  2.895764  ,  2.84288212]
+    #p2 = [3.21012159,  3.04687657,  2.62343952]
+    #p3 = [2.89465061,  -2.0,  2.51265069]
+    #
+    #print ll.hList[0].distance_aprox(p1, p3)
+    #print ll.hList[0].distance_aprox(p3, p1)
+    #print ll.hList[0].distance_aprox(p1, p3)
+    #print ll.hList[0].distance_aprox(p3, p1)
+
 #%%
-##examples...
+def test2():
+    n = 5
+    d = 2**n
+    dim = 3
+    maxB = 50
+    tables = 10
+    nruns = 7
 
-nruns = 1000
+    sparse.rand(5, 5, density=0.1)
+    
+    ll = LSH(dimensionSize=dim, numberTables=tables, hyperPlanesNumber=d, maxBucketSize=maxB, is_sparse=True)
 
-n = 8
-d = 2**n
-dim = 3
-ll = LSH(dimensionSize=dim, numberTables=10, hyperPlanesNumber=d, maxBucketSize=70)
+    ll.evaluate(nruns)
 
-ID = 1
-for run in range(nruns):
-    p = np.random.randn(dim)
-    ll.add(ID, p)
-    ID += 1
+    
+    ll.myprint()
+    
+    
 
-p1 = [3.15, 1, -3.2]
-ll.add(ID, p1)
-ID += 1
+from scipy.sparse import *
+from scipy import *
+from scipy import stats
 
-p1 = [3.16, 3.14, -3.2]
-ll.add(ID, p1)
-ID += 1
+def randomPoint(dim):
+    rvs = stats.randint(low = 1, high = 5).rvs #.norm(scale=2, loc=0).rvs
+    #S = sparse.random(1, dim, density=0.25, data_rvs=rvs)
+    S = sparse.random(1, dim, format='coo', density=0.25, data_rvs=rvs)
+    #stats.poisson(10, loc=0).rvs
+    #rvs = stats.randint.stats(0, 100, moments='mvsk')
+    print S, '\n', S.getnnz()
 
-p1 = [3.1, 3.1, -3.21]
-ll.add(ID, p1)
-ID += 1
-
-
-
-ll.myprint()
-
-#%%
-#import math
-
-ll.evaluate(nruns)
-
-#p1 = [3.15, 1, -3.2]
-#p2 = [3.16, 3.14, -3.2]
-#
-#p1 = np.asarray(p1)
-#p2 = np.asarray(p2)
-#
-#print p1, ', ', p2, ',', 
-#
-#dist = ll.distance(p1, p2) 
-#print 'hash distance: %.10f, ' % dist, 
-#
-#dist = distance_cosine(p1, p2)
-#print 'distance_cosine: %.10f, ' % dist, 
-#
-#dist = angular_similarity(p1, p2)
-#print 'angular_similarity: %.10f' % dist
-
-
+if __name__ == '__main__':
+    test1()
+    #test2()
+    #randomPoint(100)
+#    S = dok_matrix((5,5), dtype=int32)
+#    for i in range(5):
+#        for j in range(5):
+#            S[i,j] = i+j # Update element
+    
+    
