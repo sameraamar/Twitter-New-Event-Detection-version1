@@ -4,18 +4,50 @@ Created on Sun Oct 16 12:51:47 2016
 
 @author: SAMERA
 """
-#import pprint
-import numpy as np
+
+
+from scipy.sparse import *
+from scipy import *
+from scipy import stats
+
+
+def randomPoint(dim):
+    rvs = stats.randint(low = 1, high = 5).rvs #.norm(scale=2, loc=0).rvs
+    #S = sparse.random(1, dim, density=0.25, data_rvs=rvs)
+    S = sparse.random(1, dim, format='coo', density=0.25, data_rvs=rvs)
+    
+    #stats.poisson(10, loc=0).rvs
+    #rvs = stats.randint.stats(0, 100, moments='mvsk')
+    return S
+    
+      
+'''compute norm of a sparse vector'''
+def norm(x):
+    sum_sq=x.dot(x.T)
+    
+    norm=np.sqrt(sum_sq)
+    return(norm)
+        
+def randomVector(dim, normalize=True):
+    #rvs = stats.randint(low = 1, high = 5).rvs #.norm(scale=2, loc=0).rvs
+    #S = sparse.random(1, dim, density=0.25, data_rvs=rvs)
+    P = sparse.random(1, dim, format='coo', density=0.25) #, data_rvs=rvs)
+    
+    if normalize:
+        P = P / norm(P)[0,0]
+    return P
+    
+
+#%%
+
 from scipy import spatial
 import math
-import scipy.sparse as sparse
 
-def check(v1,v2, is_sparse):
-    if not is_sparse and len(v1) != len(v2):
+
+def check(v1,v2):
+    if len(v1) != len(v2):
         raise ValueError( "Not maching lengths of ", v1, v2)
-      
-        
-        
+
 def dotProduct(v1, v2, is_sparse):
     check(v1, v2, is_sparse)
     if is_sparse:
@@ -202,13 +234,17 @@ class LSH:
         
 
     def distance(self, p1, p2):
-        dmin = None
+        dmax = None
         for h in self.hList:
             d = h.distance_aprox(p1, p2)
-            if dmin == None or dmin>d:
-                dmin = d
+            if dmax == None or dmax>d:
+                dmax = d
+            
                 
-        return dmin
+        h = self.hList[  np.random.randint( len(self.hList) ) ]
+        dmax = h.distance_aprox(p1, p2)
+        
+        return dmax
         
     def hash_similarity(self, p1, p2):
         return 1-self.distance(p1, p2)
@@ -298,7 +334,7 @@ def test2():
     tables = 10
     nruns = 7
 
-    sparse.rand(5, 5, density=0.1)
+    #sparse.rand(5, 5, density=0.1)
     
     ll = LSH(dimensionSize=dim, numberTables=tables, hyperPlanesNumber=d, maxBucketSize=maxB, is_sparse=True)
 
@@ -309,25 +345,18 @@ def test2():
     
     
 
-from scipy.sparse import *
-from scipy import *
-from scipy import stats
-
-def randomPoint(dim):
-    rvs = stats.randint(low = 1, high = 5).rvs #.norm(scale=2, loc=0).rvs
-    #S = sparse.random(1, dim, density=0.25, data_rvs=rvs)
-    S = sparse.random(1, dim, format='coo', density=0.25, data_rvs=rvs)
-    #stats.poisson(10, loc=0).rvs
-    #rvs = stats.randint.stats(0, 100, moments='mvsk')
-    print S, '\n', S.getnnz()
 
 if __name__ == '__main__':
-    test1()
+    #test1()
     #test2()
     #randomPoint(100)
-#    S = dok_matrix((5,5), dtype=int32)
+    #S = dok_matrix((50,50), dtype=int32)
+    print 'Point:'
+    print randomPoint(50)
+    print 'Vector:'
+    print randomVector(50)
 #    for i in range(5):
 #        for j in range(5):
 #            S[i,j] = i+j # Update element
-    
+#    print S, S.getnnz()
     
