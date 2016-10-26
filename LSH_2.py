@@ -7,13 +7,10 @@ Created on Sun Oct 16 12:51:47 2016
 
 
 import math
-from scipy import sparse 
-#from scipy import *
-import time
-#from scipy import spatial
+from scipy import sparse
 from scipy import stats
 import numpy as np
-
+import multirun
 
 def debug(logger, message):
     logger.debug(message)
@@ -68,18 +65,21 @@ class MathHelper:
         global norm_values 
         norm_values = {}
 
-    def randomPoint(self, dim):
+    def randomPoint(self, features):
+        return self.randomSamples(1, features)
+        
+    def randomSamples(self, samples, features):
         rvs = stats.randint(low = 1, high = 5).rvs #.norm(scale=2, loc=0).rvs
         #rvs =  numpy.random.randn
         #S = sparse.random(1, dim, density=0.25, data_rvs=rvs)
-        den = min(20.0/dim, 0.9)
-        S = sparse.random(1, dim, format='lil', density=den, data_rvs=rvs)
+        den = min(20.0/(features*samples), 0.9)
+        S = sparse.random(samples, features, format='lil', density=den, data_rvs=rvs)
         
         #stats.poisson(10, loc=0).rvs
         #rvs = stats.randint.stats(0, 100, moments='mvsk')
         return S
         
-    
+        
           
     '''compute norm of a sparse vector'''
     def norm(self, id1, x):
@@ -201,8 +201,9 @@ class HashtableLSH:
     zeros = ''
     d = 0
     logger = None
-    
+    hashcodes = None
     helper = None
+    doc_indices = {}
     
     def __init__(self, maxBucketSize, dimensionSize, hyperPlanesNumber, logger, helper):
         self.hyperPlanesNumber = hyperPlanesNumber
@@ -218,6 +219,7 @@ class HashtableLSH:
         
     '''item is in the same structure as returned by add function'''
     def findNearest(self, item):
+        self.logger.entry('HashtableLSH.findNearest')
         bucket = self.buckets[item['hashcode']]
 
         nearest = None
@@ -234,16 +236,92 @@ class HashtableLSH:
                 minDist = dist
                 nearest = neighbor
 
+        self.logger.exit('HashtableLSH.findNearest')
         return nearest, minDist, bucket_size
+
+    def generateHashCode(self, point, id1):
+        self.logger.entry('HashtableLSH.generateHashCode')
         
+        if id1==None or len(self.doc_indices)==0:
+            assert(False)
+            hashcode = point.dot(self.hyperPlanes)
+            hashcode[hashcode < 0] = 0
+            hashcode[hashcode > 0] = 1
+            
+            hashcode.eliminate_zeros()
+
+        else:
+            index = self.doc_indices[id1]
+            hashcode = self.hashcodes[index,:]
+
+        
+        asstr = hashcode.A.astype('S1').tostring()
+        
+#        nonzeros = np.nonzero(hashcode)
+#        asstr = ['0']*self.hyperPlanesNumber
+#        if nonzeros != None:
+#            for i in nonzeros[1]:
+#                asstr[i] = '1'
+#        asstr = ''.join(asstr)
+
+#        ll=np.empty(hashcode.shape[1], dtype='U1')
+#        ll.fill('0')
+#        print (hashcode)
+#        ll[np.nonzero(hashcode)]='1'
+
+        values = (hashcode, asstr)
+
+        #asstr.join(hashcode)
+        #debug(self.logger, 'generateHashCode: {}'.format (time.time()-base))
+        self.logger.exit('HashtableLSH.generateHashCode')
+        return values
+        
+    def add_all(self, doc_indices, points):
+        self.logger.entry('HashtableLSH.add_all')        
+        self.doc_indices = doc_indices
+        self.hashcodes = points.dot(self.hyperPlanes)
+        self.hashcodes[self.hashcodes < 0] = 0
+        self.hashcodes[self.hashcodes > 0] = 1
+            
+        self.hashcodes.eliminate_zeros()
+        
+        self.logger.exit('HashtableLSH.add_all')        
+    
+    def add_all2(self, doc_indices, points, id_list):
+        self.logger.entry('HashtableLSH.add_all2')        
+        #reuse hashcodes table
+        
+        
+        # calculate string per hashcode
+        
+        self.logger.exit('HashtableLSH.add_all2')    
+        items = []
+        for index in doc_indices:
+            point = points[index, :]
+            ID = id_list[index]
+            hashcode = self.hashcodes[index]
+            
+            item = {}
+            item['ID'] = ID
+            item['point'] = point
+            item['hashcode'] = hashcode
+            b = self.buckets.get(hashcode, [])
+            b.append( item ) 
+            if len(b) > self.maxBucketSize:
+                b = b[1:]
+                self.total -= 1
+            
+            self.buckets[hashcode] = b
+            items.append(item)
+            
+        return items
         
     def add(self, ID, point):
-        #base = time.time()
-        
+        self.logger.entry('HashtableLSH.add')        
         self.total += 1
 
         
-        hasharray, hashcode = self.generateHashCode(point)
+        hasharray, hashcode = self.generateHashCode(point, ID)
 
         item = {}
         item['ID'] = ID
@@ -271,99 +349,11 @@ class HashtableLSH:
         
         self.buckets[hashcode] = b
         
-        #debug(self.logger, 'HashtableLSH.add: '.format  (time.time()-base))
-        #print 'HashtableLSH.add: ' + str(time.time()-base)
+        self.logger.exit('HashtableLSH.add')        
         return item
 
-    def generateHashCode(self, point):
-        #base = time.time()
-        hashcode = point.dot(self.hyperPlanes)
-        hashcode[hashcode < 0] = 0
-        hashcode[hashcode > 0] = 1
-        
-        hashcode.eliminate_zeros()
-
-        nonzeros = np.nonzero(hashcode)
-        
-        asstr = ['0']*self.hyperPlanesNumber
-        if nonzeros != None:
-            for i in nonzeros[1]:
-                asstr[i] = '1'
-        asstr = ''.join(asstr)
-                
-        
-        #asstr.join(hashcode)
-        
-        #debug(self.logger, 'generateHashCode: {}'.format (time.time()-base))
-        return hashcode, asstr
-        
-        
-#    def generateHashCode1(self, point):
-#        base = time.time()
-#        
-#        hashcode = []
-#        
-#        res = point.dot(self.hyperPlanes) 
-#        for bit in range(res.shape[1]):
-#            if res[0, bit] >= 0:
-#                hashcode.append(1)
-#            else:
-#                hashcode.append(0)
-#        
-#        debug( 'generateHashCode1', (time.time()-base))
-#        return hashcode
-
-    def generateHashCode2(self, point):
-        base = time.time()
-        
-        #hashcode = self.hyperPlanes.dot( point.T )
-        hashcode = point.dot(self.hyperPlanes)
-        #hashcode[hashcode < 0] = 0
-        #hashcode[hashcode > 0] = 1
-#        nonzeros = hashcode.nonzero()
-#        
-#        res = [0]*self.hyperPlanesNumber
-#        for j in nonzeros[1]:
-#            if hashcode[0, j]:
-#                res[j] = 1 #hashcode[0, j]
-        
-        #hashcode = (self.hyperPlanes * point.T)
-        #hashcode = hashcode < 0
-        #hashcode = np.array(hashcode, dtype=int)
-        #hashcode[hashcode > 0] = 1
-        #hashcode[hashcode < 0] = 0
-
-        
-        hashcode[ hashcode > 0 ] = 1
-        hashcode[ hashcode < 0 ] = 0
-        
-        hashcode.eliminate_zeros()
-        nonzeros = np.nonzero(hashcode)
-        
-        asstr = ['0']*self.hyperPlanesNumber
-        if nonzeros != None:
-            for i in nonzeros[1]:
-                asstr[i] = '1'
-        asstr = ''.join(asstr)
-            
-        
-        #print 'hash: ', hashcode
-        
-        
-#        hashcode = ''
-#        for hyperplane in self.hyperPlanes:
-#            if(dotProduct(point, hyperplane) < 0):
-#                hashcode += '0'
-#            else:
-#                hashcode += '1'
-        debug(self.logger, 'generateHashCode2: '.format  (time.time()-base))
-        
-        return hashcode, asstr
-
-
     def randomHyperPlanes(self, dimSize, hyperPlanesNumber):
-        base = time.time()
-        
+        self.logger.entry('HashtableLSH.randomHyperPlanes')        
         rvs = stats.norm(loc=0).rvs  #scale=2, 
         planes = sparse.random(dimSize, hyperPlanesNumber, format='lil', density=1.0, data_rvs=rvs)
         
@@ -374,15 +364,16 @@ class HashtableLSH:
 #                if (planes[:,k] - planes[:,r]).nnz == 0:
 #                    debug("randomHyperPlanes", 'duplicate ' + str(k) + ' and ' + str(r))
         
-        debug(self.logger, 'randomHyperPlanes: {}'.format  (time.time()-base) )
+        self.logger.exit('HashtableLSH.randomHyperPlanes')        
         return planes
    
     def size(self):
         return self.total
 
-    def distance_aprox(self, p1, p2):
-        h1, st1 = self.generateHashCode(p1)
-        h2, st2 = self.generateHashCode(p2)
+    def distance_aprox(self, id1, id2, p1, p2):
+        self.logger.entry('distance_aprox')        
+        h1, st1 = self.generateHashCode(p1, id1)
+        h2, st2 = self.generateHashCode(p2, id2)
         
         xor = (h1 + h2) 
         xor[xor == 2] = 0
@@ -397,6 +388,7 @@ class HashtableLSH:
         
         d = self.hyperPlanesNumber
         res = (d-nnz_xor)/float(d)
+        self.logger.exit('distance_aprox')        
         return 1.0 - res
         
 #        #p1 [p1 != 0] = 1.0
@@ -414,7 +406,9 @@ class HashtableLSH:
         info(self.logger, 'total: {0}. number of buckets: {1}.  max bucke size: {2}. hyperplanes number: {3}'.format(self.total, len(self.buckets), self.maxBucketSize, self.hyperPlanesNumber))
         lengths = [len(self.buckets[b]) for b in self.buckets]
         info(self.logger, 'number of items in each bucket: {}'.format( lengths))
-     
+
+import time        
+        
 class LSH:
     """LSH class"""
     dimSize = 3
@@ -426,6 +420,7 @@ class LSH:
 
     def __init__(self, dimensionSize, logger, hyperPlanesNumber=40, numberTables=4, maxBucketSize=10):
         self.logger = logger
+        self.logger.entry('LSH.__init__')
         self.helper = MathHelper(logger)
         self.helper.clear()
         info(self.logger, 'LSH model being initialized')
@@ -433,6 +428,7 @@ class LSH:
         self.numberTables = numberTables
         self.hList = [HashtableLSH(maxBucketSize, dimensionSize, hyperPlanesNumber, logger, self.helper) for i in range(numberTables)]
         info(self.logger, 'LSH model initialization done')
+        self.logger.exit('LSH.__init__')
 
     def myprint(self):
         if self.logger == None:
@@ -443,9 +439,58 @@ class LSH:
             h.myprint()
         info(self.logger, 'dimenion: {0} tables {1} '.format(self.dimSize, self.numberTables))
 
-    
+    def add_all(self, doc_indices, points):
+        self.logger.entry('LSH.add_all')        
+        print ('add_all', time.time())
+        invokes = []
+        for table in self.hList:
+            invokes.append( (table.add_all, doc_indices, points) )
+            #table.add_all(doc_indices, points)
+        multirun.run_all(invokes)
+        print ('add_all - done', time.time())
+        self.logger.entry('LSH.add_all')        
+
+    def add_all2(self, doc_indices, points, id_list):
+        results = []
+        for table in self.hList:
+            res = table.add_all2(doc_indices, points, id_list)
+            results.append(res)
+        return results
+
+    def add_single(self, table, ID, point):
+        item = table.add(ID, point)
+        
+        if True:
+            candidateNeighbor, dist, bucket_size = table.findNearest(item)            
+        return ID, candidateNeighbor, dist, bucket_size 
+        
     def add(self, ID, point):
-        before = time.time()
+        self.logger.entry('LSH.add')        
+        """add a point to the hash table
+        the format of the point is assumed to be parse so it will be in libSVM format
+        json {word:count, word:cout}"""
+        nearest = None
+        nearestDist = None
+        comparisons = 0
+        invokes = []
+        for table in self.hList:
+            invokes.append( ( self.add_single, table, ID, point) )
+        results = multirun.run_all(invokes)
+        
+        #print('debug: ' + str(results))
+        if True:
+            for id1, candidateNeighbor, dist, bucket_size in results:
+                comparisons += bucket_size-1
+                if nearestDist==None or (dist != None and nearestDist>dist):
+                    nearest = candidateNeighbor
+                    nearestDist = dist
+                    
+        
+        self.logger.exit('LSH.add')        
+        return nearest, nearestDist, comparisons
+
+    def add1(self, ID, point):
+        self.logger.entry('LSH.add')        
         """add a point to the hash table
         the format of the point is assumed to be parse so it will be in libSVM format
         json {word:count, word:cout}"""
@@ -463,13 +508,14 @@ class LSH:
                     nearestDist = dist
                     
         
-        debug(self.logger, 'LSH.add: {}'.format  (time.time()-before))
+        self.logger.exit('LSH.add')        
         return nearest, nearestDist, comparisons
 
-    def distance(self, p1, p2):
+
+    def distance(self, id1, id2, p1, p2):
         dist = None
         for h in self.hList:
-            d = h.distance_aprox(p1, p2)
+            d = h.distance_aprox(id1, id2, p1, p2)
             if dist == None or dist>d:
                 dist = d
             
@@ -479,8 +525,8 @@ class LSH:
         
         return dist
         
-    def hash_similarity(self, p1, p2):
-        return 1-self.distance(p1, p2)
+    def hash_similarity(self, id1, id2, p1, p2):
+        return 1-self.distance(id1, id2, p1, p2)
             
 
     def evaluate(self, nruns):
@@ -494,7 +540,7 @@ class LSH:
             p1 = self.helper.randomPoint(self.dimSize)        
             p2 = self.helper.randomPoint(self.dimSize)   
             
-            hash_sim = self.hash_similarity(p1, p2) 
+            hash_sim = self.hash_similarity(id1, id2, p1, p2) 
             true_sim = self.helper.angular_similarity(id1, id2, p1, p2)
             id1 += 2
             id2 += 2
@@ -506,97 +552,65 @@ class LSH:
         self.helper.clear()
 
 
-        
-        
-#%%
-
-from simplelogger import simplelogger 
-
-def init_log():
-    #logging.config.fileConfig('logging.conf')
-    
-    # create logger
-    logger = simplelogger()
-    logger.init('c:/temp/file2.log', file_level=simplelogger.INFO, std_level=simplelogger.INFO)
-    
-    # 'application' code
-    debug(logger, 'debug message')
-    info(logger, 'info message')
-    #logger.warning('warn message')
-    logger.error('error message')
-
-    return logger
 
 #%%
-
-def test2(logger):
-    n = 4
-    d = 2**n
-    dim = 4
-    maxB = 500
-    tables = 5
-    nruns = 3000
-    
-    logger = init_log()
-    helper = MathHelper(logger)
-    
-    #sparse.rand(5, 5, density=0.1)
-    before = time.time()
-    #print before
-    ll = LSH(dimensionSize=dim, logger=logger, numberTables=tables, hyperPlanesNumber=d, maxBucketSize=maxB)
-    after = time.time()
-
-    print ('build model: ', ( after-before))
-    
-#    p = randomPoint(dim)
-#    p[0,0] = 4
-#    p[0,1] = 3
-#    p[0,2] = 5
-#    
-#    before = time.time()
-#    for i in range(1000):
-#        ll.hList[0].generateHashCode(p)
-#        
-#    print ('hash :', (time.time()-before))
-#
-#    before = time.time()    
-#        
-#    for i in range(1000):
-#        ll.hList[0].generateHashCode2(p)
-#    
-#        
-#    print ('hash 2:', (time.time()-before))
-#    before = time.time()    
-#        
-#    for i in range(1000):
-#        ll.hList[1].generateHashCode1(p)
-#       
-#    print 'hash 1:', (time.time()-before)
-    
-    ll.evaluate(100)
-
-    ID = 100
-    before = time.time()
-    for run in range(nruns):
-        p = helper.randomPoint(dim)
-        
-        #logger.error('Generated point D{0}:\n{1}'.format(ID, p))
-        
-        ll.add('D'+str(ID), p)
-        ID += 1
-        perc = 100.0*run/nruns
-        if perc % 10 == 0:
-            t = time.time()-before
-            info(logger, '%.2f %% (time: %.8f)' % (perc, t))
-            before = time.time()
-
-    ll.myprint()
- 
-    
-    return ll
-
-
 if __name__ == '__main__':
+  
+
+    from simplelogger import simplelogger 
+    from time import time
+    
+    def init_log():
+        #logging.config.fileConfig('logging.conf')
+        
+        # create logger
+        logger = simplelogger()
+        logger.init('c:/temp/file2.log', file_level=simplelogger.INFO, std_level=simplelogger.INFO, profiling=True)
+        
+        # 'application' code
+        debug(logger, 'debug message')
+        info(logger, 'info message')
+        #logger.warning('warn message')
+        logger.error('error message')
+    
+        return logger
+
+    
+    def test2(logger):
+        n = 4
+        d = 2**n
+        dim = 5
+        maxB = 500
+        tables = 5
+        nruns = 300
+        
+        logger = init_log()
+        helper = MathHelper(logger)
+        
+    
+        ll = LSH(dimensionSize=dim, logger=logger, numberTables=tables, hyperPlanesNumber=d, maxBucketSize=maxB)
+        ll.evaluate(100)
+    
+        ID = 100
+        before = time()
+        for run in range(nruns):
+            p = helper.randomPoint(dim)
+            
+            #logger.error('Generated point D{0}:\n{1}'.format(ID, p))
+            
+            ll.add('D'+str(ID), p)
+            ID += 1
+            perc = 100.0*run/nruns
+            if perc % 10 == 0:
+                t = time()-before
+                info(logger, '%.2f %% (time: %.8f)' % (perc, t))
+                before = time()
+    
+        ll.myprint()
+     
+        
+        return ll
+    
     
     logger = init_log()
 #    helper = MathHelper(logger)

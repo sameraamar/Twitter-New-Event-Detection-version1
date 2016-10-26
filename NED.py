@@ -13,12 +13,6 @@ import json
 from simplelogger import simplelogger
 import time, codecs
 
-def init_log():
-    logger = simplelogger()
-    logger.init(filename='c:/temp/lsh.log', std_level=simplelogger.INFO, file_level=simplelogger.DEBUG)
-    
-    return logger
-
 #%%
 
 class NED_LSH_model:
@@ -34,7 +28,9 @@ class NED_LSH_model:
     threads = {}
     tweet2thread = {}
     text_data = []
+    doc_indices = {}
     id_list = []
+    
     text_metadata = {}
 
     #'''
@@ -53,10 +49,12 @@ class NED_LSH_model:
         self.lsh = lsh.LSH(logger=self.logger, dimensionSize=self.dimension , numberTables=self.tables, 
                      hyperPlanesNumber=self.hyper_planes, maxBucketSize=self.max_bucket_size)
 
-    def run(self, text_data, id_list, text_metadata):
+    def run(self, text_data, id_list, text_metadata, doc_indices):
+        self.logger.entry('NED_LSH_model.run')
         self.text_data = text_data
         self.id_list = id_list
         self.text_metadata = text_metadata
+        self.doc_indices = doc_indices
         
         self.count_vect = CountVectorizer() #stop_words='english')
         self.counts = self.count_vect.fit_transform(text_data)
@@ -68,12 +66,16 @@ class NED_LSH_model:
         nn = len(text_data)
         p = 0.0
         comparisons_all = 0
-        before = time.time()
+        base = before = time.time()
+        
+#        self.logger.debug ('Adding document {0} ({2}) out of {1}'.format(sample, self.counts.shape[0], ID))
+#        nearest, nearestDist, comparisons = lshmodel.lsh.add_all(self.id_list, self.counts)
+        lshmodel.lsh.add_all(self.doc_indices, self.counts)
+        block = nn / 20
         for sample in range(nn):
             ID = self.id_list[sample]
             doc = self.counts[sample, :]
 
-            #ID = text_data[sample]['id_str'] #text_metadata[sample]['ID']
             self.logger.debug ('Adding document {0} ({2}) out of {1}'.format(sample, self.counts.shape[0], ID))
             nearest, nearestDist, comparisons = lshmodel.lsh.add(ID, doc)
             
@@ -87,17 +89,21 @@ class NED_LSH_model:
                 self.tweet2thread[ID] = nearThreadID
             
             comparisons_all += comparisons
-            tmp = int(10.0*sample/nn)
-            if (p < tmp):
-                p = tmp
+            
+            if (sample % block == 0):
+                p = 100.0*sample/nn
                 after = time.time()
-                self.logger.info('{2}/{3} = {0} %% - {1} seconds [comparisons: {4}]'.format(10*p, after-before, sample, nn, comparisons_all))
+                tmp = after-base
+                tmp = (int(tmp/60) , int(tmp)%60)
+                self.logger.info('{2}/{3} = {0} %% - {1:.1f} seconds [comparisons: {4}]. Total time spent: {5}:{6}'.format(p, (after-before), sample, nn, comparisons_all, tmp[0], tmp[1]))
                 before = after
                 comparisons_all = 0
                 
         self.logger.info ('corpus size: {0} '.format(doc.shape[1]))
+        self.logger.exit('NED_LSH_model.run')
         
     def dumpThreads(self, filename, max_threads):
+        self.logger.entry('dumpThreads')
         file = codecs.open(filename, 'w', encoding='utf-8')
         
         file.write('Printing {} threads...\n'.format( min(max_threads, len(self.threads) ) ) )
@@ -105,7 +111,7 @@ class NED_LSH_model:
         for x in sorted(self.threads, key=lambda x: len(self.threads[x]), reverse=True):
             threadSize = len(self.threads[x])
             
-            self.logger.info('{0}: {1}'.format(x, threadSize))
+            self.logger.info('Thread {0}: has {1} documents'.format(x, threadSize))
             text = self.text_metadata[x]['text'] #.replace('\t', ' ')
             #text = text.encode(encoding='utf-8')
             file.write('\n' + '-'*40 + ' THREAD {0} - {1} documents '.format(thr, threadSize) + '-'*40 + '\n')
@@ -113,7 +119,7 @@ class NED_LSH_model:
             file.write('thread\tleading doc\titem#\titem ID\titem text\titem text(original)\n')
             c = 1
             for item in self.threads[x]:
-                i = self.text_metadata[item]['#'] 
+                i = self.doc_indices[item]
                 text1 = self.text_data[i]
                 text2 = self.text_metadata[item]['text'] 
             
@@ -124,6 +130,7 @@ class NED_LSH_model:
                 break
             
         file.close()
+        self.logger.exit('dumpThreads')
        
         
 class Listener:
@@ -167,7 +174,10 @@ class TextStreamer(Action):
             # json
             data = json.loads(line)
             # convert to text 
-            itemTime = data['created_at']
+            created_at = data['created_at']
+
+            itemTimestamp = time.mktime(time.strptime(created_at,"%a %b %d %H:%M:%S +0000 %Y"))
+            data['timestamp'] = itemTimestamp
             
             # publish to listeners
             if not self.publish(data):
@@ -179,9 +189,10 @@ class TextStreamer(Action):
         self.logger.info('TextStreamer is shutting down')
 
         
-from pymongo import MongoClient, ASCENDING
+from pymongo import MongoClient
 import pymongo 
-        
+     
+
 class MongoDBStreamer(Action):
     dbcoll = None
 
@@ -191,6 +202,7 @@ class MongoDBStreamer(Action):
         self.dbcoll = db[collname]
  
     def start(self):
+        self.logger.entry('MongoDBStreamer.start')
         for item in self.dbcoll.find().sort("_id", pymongo.ASCENDING):
             # json
             data = item.get('json', None)
@@ -199,7 +211,13 @@ class MongoDBStreamer(Action):
             
             #data = json.loads(data)
             # convert to text 
-            itemTime = data['created_at']
+            created_at = data['created_at']
+
+            itemTimestamp = time.mktime(time.strptime(created_at,"%a %b %d %H:%M:%S +0000 %Y"))
+            data['timestamp'] = itemTimestamp
+
+            #dt = datetime.fromtimestamp(itemTimestamp)
+            #data['created_at2'] = dt
             
             # publish to listeners
             if not self.publish(data):
@@ -209,11 +227,12 @@ class MongoDBStreamer(Action):
             # time controller
             
         self.logger.info('Database Streamer is shutting down')
+        self.logger.exit('MongoDBStreamer.start')
 
         
 from sklearn.feature_extraction.text import CountVectorizer
 import re
-from nltk.tokenize import TweetTokenizer
+#from nltk.tokenize import TweetTokenizer
 
         
 class TextListener(Listener):
@@ -221,6 +240,7 @@ class TextListener(Listener):
     text_data = []
     id_list = []
     text_metadata = {}
+    doc_indices = {}
 
     max_documents = 0
         
@@ -234,6 +254,7 @@ class TextListener(Listener):
         
         metadata['retweet'] = (data.get('retweet', None) != None)
         
+        metadata['timestamp'] = data['timestamp']
         itemText = data['text']
         itemText = self.process(itemText)
         metadata['text'] = data['text'].replace('\t', ' ').replace('\n', '. ')
@@ -241,13 +262,18 @@ class TextListener(Listener):
         self.id_list.append ( ID )
 
         index = len(self.text_data)-1
-        metadata['#'] = index
         self.text_metadata[ ID ] = metadata
+        self.doc_indices[ ID ] = index
 
         if index+1 == self.max_documents:
+            before = time.time()
             self.logger.info('running LSH on {} documents'.format(index+1))
-            lshmodel.run(self.text_data, self.id_list, self.text_metadata)
-                
+            
+            lshmodel.run(self.text_data, self.id_list, self.text_metadata, self.doc_indices)
+            x = time.time()-before
+            x = (int(x/60), int(x)%60)
+
+            self.logger.info('Time for running the LSH model was: {0} min and {1} sec'.format(x[0], x[1]))
             return False
             
         if index % 100 == 0:
@@ -266,15 +292,15 @@ class TextListener(Listener):
         
         
 #%%        
-n = 3
+n = 6
 hp = 2**n
 maxB = 50
 #dim=3
 tables = 8
 epsilon=0.5
 #%%
-max_threads = 10
-max_docs = 10000
+max_threads = 2
+max_docs = 1000
 
 #%%
 
@@ -286,8 +312,13 @@ collection = 'posts'
 #db = 'test'
 #collection = 'test'
 
+log_filename = 'c:/temp/log_test4.log'
+threads_filename = 'c:/temp/threads_test4.txt'
+
 #%%
-logger = init_log()
+logger = simplelogger()
+logger.init(filename=log_filename, std_level=simplelogger.INFO, file_level=simplelogger.DEBUG, profiling=True)
+#logger = init_log(log_filename, std_level=simplelogger.INFO, file_level=simplelogger.DEBUG)
 
 #%%
 lshmodel = NED_LSH_model()
@@ -310,25 +341,28 @@ nn = len(listener.text_data)
 logger.info('Loaded {} text documents.'.format(nn))
 
 #%%
+    
+_thr = lshmodel.dumpThreads(threads_filename, max_threads)
+
+logger.info('print profiling!')
+
+logger.profiling_dump()
+
+logger.info('I am done!')
+
+
+#%%
 #print (type(listener.text_data))
 #
 #print (listener.text_data[5])
 #print (lshmodel.counts[5, :])
 #print (lshmodel.count_vect.get_feature_names()[572])
 
-lshmodel.lsh.myprint()
-
-#%%
-    
-_thr = lshmodel.dumpThreads('c:/temp/threads.txt', max_threads)
-
-
-#%%
-#print (lshmodel.threads['768236668625252352'])
+#lshmodel.lsh.myprint()
 
 
     
 #%%
 logger.info('Done.')
-#logger.close()
+logger.close()
 
