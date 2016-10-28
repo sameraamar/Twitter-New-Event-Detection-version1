@@ -5,74 +5,386 @@ Created on Sun Oct 16 12:51:47 2016
 @author: SAMERA
 """
 
-print 'Hello'
-
-
-text = """768236377691590656, 1 2 
-768236377934819328, 3 4 5 6 7 4 8 9 10 11 12 11 
-768236379125846016, 13 14 15 16 17 18 19 
-768236379151228928, 20 21 22 23 24 25 20 26 27 28 29 30 31 32 33 34 35 36 37 38 39 27 40 41 42 43 
-768236380426207232, 44 45 46 47 48 49 21 22 50 51 52 53 54 55 56 57 58 34 35 57 59 60 61 62 42 63 64 65 
-768236380623372288, 1 66 67 68 69 70 
-768236381130878976, 71 72 73 74 75 76 77 
-768236381558693888, 78 79 80 81 82 83 84 85 86 87 88 89 90 
-768236381923635200, 91 92 92 93 27 94 95 95 96 97 
-768236382183620609, 98 99 100 101 102 103 104 105 
-768236382628225025, 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120 121 122 
-768236382825410561, 123 124 125 126 127 128 129 
-768236383081234432, 21 22 130 30 131 132 133 134 135 136 137 34 35 138 139 137 42 
-768236383605551104, 140 18 
-768236384335298560, 141 142 143 144 145 146 147 148 149 150 151 152 153 154 151 151 
-768236384981221376, 155 21 22 25 156 157 158 159 160 161 162 135 
-768236386021478400, 136 163 34 35 161 164 165 166 25 167 168 169 139 137 42 170 171 
-768236386763890688, 172 173 174 175 
-768236386910625792, 1 176 177 178 179 151 180 181 182 183 184 151 185 186 187 181 188 189 
-768236387040628736, 1 190 191 192 193 194 195 196 195 197 
-768236387451674628, 1 148 151 198 199 200 148 201 202 200 
-768236387757940736, 1 203 204 205 206 207 208 
-768236387845963776, 1 209 151 210 211 151 212 213 214 215 216 217 218 219 220 221 222 189 
-768236388475023360, 1 223 224 225 226 227 228 229 230 231 232 233 234 
-768236388722601984, 1 235 236 237 238 239 238 240 238 241 242 235 236 243 244 245 246 247 248 249 250 251 252 242 235 236 253 254 247 255 
-768236388819070976, 18 18 """
-
-
-
-text = text.split('\n')
-tweets = {}
-dim = 0
-for t in text:
-    (tweetID, words) = t.split(', ')
-    words = words.strip().split(' ')
-    sparse = {}
-    for w in words:
-        w = int(w)
-        sparse[w] = sparse.get(w,0) + 1
-        
-    tmp = max(sparse.keys())
-    if tmp>dim:
-        dim=tmp
-    tweets[tweetID] = sparse
+import LSH_2 as lsh
+import json
 
 #%%
-import LSH
 
-n = 10
-d = 2**n
-maxB = 50
-tables = 10
-ll = LSH.LSH(dimensionSize=dim, numberTables=tables, hyperPlanesNumber=d, maxBucketSize=maxB)
+from simplelogger import simplelogger
+import time, codecs
 
-for tweet in tweets: 
-    ll.add(tweet, tweets[tweet])
-    print (tweets[tweet])
+#%%
+
+class NED_LSH_model:
+    lsh = None
+    tables = 0
+    hyper_planes = 0
+    dimension = 0
+    max_bucket_size = 0
+    logger = None
+    epsilon = 0
     
+    #%%
+    threads = {}
+    tweet2thread = {}
+    text_data = []
+    doc_indices = {}
+    id_list = []
+    
+    text_metadata = {}
+
+    #'''
+    counts = None
+    count_vect = None
+
+    def init(self, logger, hyper_planes, tables, max_bucket_size=50, dimension=3, epsilon=0.5):
+        self.logger = logger
+        self.hyper_planes = hyper_planes
+        self.tables = tables
+        self.max_bucket_size = max_bucket_size
+        self.dimension = dimension
+        self.epsilon = epsilon
+
+    def rebuild(self):
+        self.lsh = lsh.LSH(logger=self.logger, dimensionSize=self.dimension , numberTables=self.tables, 
+                     hyperPlanesNumber=self.hyper_planes, maxBucketSize=self.max_bucket_size)
+
+    def run(self, text_data, id_list, text_metadata, doc_indices):
+        self.logger.entry('NED_LSH_model.run')
+        self.text_data = text_data
+        self.id_list = id_list
+        self.text_metadata = text_metadata
+        self.doc_indices = doc_indices
+        
+        self.count_vect = CountVectorizer() #stop_words='english')
+        self.counts = self.count_vect.fit_transform(text_data)
+            
+        # update the dimension
+        self.dimension = self.counts.shape[1]
+        self.rebuild()
+            
+        nn = len(text_data)
+        p = 0.0
+        comparisons_all = 0
+        base = before = time.time()
+        
+#        self.logger.debug ('Adding document {0} ({2}) out of {1}'.format(sample, self.counts.shape[0], ID))
+#        nearest, nearestDist, comparisons = lshmodel.lsh.add_all(self.id_list, self.counts)
+        lshmodel.lsh.add_all(self.doc_indices, self.counts)
+        #lshmodel.lsh.add_all2(self.doc_indices, self.counts, self.id_list)
+
+
+        block = nn / 20
+        for sample in range(nn):
+            ID = self.id_list[sample]
+            doc = self.counts[sample, :]
+
+            self.logger.debug ('Adding document {0} ({2}) out of {1}'.format(sample, self.counts.shape[0], ID))
+            nearest, nearestDist, comparisons = lshmodel.lsh.add(ID, doc)
+            
+            if nearestDist == None or nearestDist > self.epsilon:
+                self.threads[ID] = [ID]
+                self.tweet2thread[ID] = ID
+            else:
+                nearID = nearest['ID']
+                nearThreadID = self.tweet2thread[nearID]
+                self.threads[nearThreadID].append(ID)
+                self.tweet2thread[ID] = nearThreadID
+            
+            comparisons_all += comparisons
+            
+            if (sample % block == 0):
+                p = 100.0*sample/nn
+                after = time.time()
+                tmp = after-base
+                tmp = (int(tmp/60) , int(tmp)%60)
+                self.logger.info('{2}/{3} = {0} %% - {1:.1f} seconds [comparisons: {4}]. Total time spent: {5}:{6}'.format(p, (after-before), sample, nn, comparisons_all, tmp[0], tmp[1]))
+                before = after
+                comparisons_all = 0
+                
+        self.logger.info ('corpus size: {0} '.format(doc.shape[1]))
+        self.logger.exit('NED_LSH_model.run')
+        
+    def dumpThreads(self, filename, max_threads):
+        self.logger.entry('dumpThreads')
+        file = codecs.open(filename, 'w', encoding='utf-8')
+        
+        file.write('Printing {} threads...\n'.format( min(max_threads, len(self.threads) ) ) )
+        thr = 1
+        for x in sorted(self.threads, key=lambda x: len(self.threads[x]), reverse=True):
+            threadSize = len(self.threads[x])
+            
+            self.logger.info('Thread {0}: has {1} documents'.format(x, threadSize))
+            text = self.text_metadata[x]['text'] #.replace('\t', ' ')
+            #text = text.encode(encoding='utf-8')
+            file.write('\n' + '-'*40 + ' THREAD {0} - {1} documents '.format(thr, threadSize) + '-'*40 + '\n')
+            file.write('Leader is {0}: "{1}"\n'.format(x, text))
+            file.write('thread\tleading doc\titem#\titem ID\titem text\titem text(original)\n')
+            c = 1
+            for item in self.threads[x]:
+                i = self.doc_indices[item]
+                text1 = self.text_data[i]
+                text2 = self.text_metadata[item]['text'] 
+            
+                file.write('{0}\t{1}\t{2}\t{3}\t"{4}"\t"{5}"\n'.format( thr, x, c, item, text1, text2 ))
+                c+=1
+            thr += 1
+            if thr>max_threads:
+                break
+            
+        file.close()
+        self.logger.exit('dumpThreads')
+       
+        
+class Listener:
+    logger = None
+    
+    def __init__(self, logger):
+        self.logger = logger
+        
+    def act(self, data):
+        # do nothing and continue
+        return True
+
+class Action:
+    listeners = []
+    logger = None
+    
+    def __init__(self, logger):
+        self.logger = logger
+        
+    def register(self, listener):
+        self.listeners.append(listener)
+
+    def publish(self, data):
+        proceed = True
+        for l in self.listeners:
+            proceed = l.act(data) and proceed
+
+        return proceed
+        
+class TextStreamer(Action):
+    source = None
+
+    def init(self, filename):
+        self.source = open(filename, 'r')
+ 
+    def start(self):
+        for line in self.source:
+            if line.strip() == '':
+                continue
+            
+            # json
+            data = json.loads(line)
+            # convert to text 
+            created_at = data['created_at']
+
+            itemTimestamp = time.mktime(time.strptime(created_at,"%a %b %d %H:%M:%S +0000 %Y"))
+            data['timestamp'] = itemTimestamp
+            
+            # publish to listeners
+            if not self.publish(data):
+                break
+
+            
+            # time controller
+       
+        self.logger.info('TextStreamer is shutting down')
+
+        
+from pymongo import MongoClient
+import pymongo 
+     
+
+class MongoDBStreamer(Action):
+    dbcoll = None
+
+    def init(self, host, port, dbname, collname):
+        client = MongoClient(host, int(port))
+        db = client[dbname]
+        self.dbcoll = db[collname]
+ 
+    def start(self):
+        self.logger.entry('MongoDBStreamer.start')
+        for item in self.dbcoll.find().sort("_id", pymongo.ASCENDING):
+            # json
+            data = item.get('json', None)
+            if data == None:
+                continue
+            
+            #data = json.loads(data)
+            # convert to text 
+            created_at = data['created_at']
+
+            itemTimestamp = time.mktime(time.strptime(created_at,"%a %b %d %H:%M:%S +0000 %Y"))
+            data['timestamp'] = itemTimestamp
+
+            #dt = datetime.fromtimestamp(itemTimestamp)
+            #data['created_at2'] = dt
+            
+            # publish to listeners
+            if not self.publish(data):
+                break
+
+            
+            # time controller
+            
+        self.logger.info('Database Streamer is shutting down')
+        self.logger.exit('MongoDBStreamer.start')
+
+        
+from sklearn.feature_extraction.text import CountVectorizer
+import re
+#from nltk.tokenize import TweetTokenizer
+
+        
+class TextListener(Listener):
+    lshmodel = None
+    text_data = []
+    id_list = []
+    text_metadata = {}
+    doc_indices = {}
+
+    max_documents = 0
+        
+    def init(self, lshmodel, max_documents):
+        self.lshmodel = lshmodel
+        self.max_documents = max_documents
+        
+        self.text_data = []
+        self.id_list = []
+        self.text_metadata = {}
+        self.doc_indices = {}        
+
+    def act(self, data):
+        metadata = {}
+        ID = data['id_str']
+        
+        metadata['retweet'] = (data.get('retweet', None) != None)
+        
+        metadata['timestamp'] = data['timestamp']
+        itemText = data['text']
+        itemText = self.process(itemText)
+        metadata['text'] = data['text'].replace('\t', ' ').replace('\n', '. ')
+        self.text_data.append( itemText )
+        self.id_list.append ( ID )
+
+        index = len(self.text_data)-1
+        self.text_metadata[ ID ] = metadata
+        self.doc_indices[ ID ] = index
+
+        if index+1 == self.max_documents:
+            before = time.time()
+            self.logger.info('running LSH on {} documents'.format(index+1))
+            
+            lshmodel.run(self.text_data, self.id_list, self.text_metadata, self.doc_indices)
+            x = time.time()-before
+            x = (int(x/60), int(x)%60)
+
+            self.logger.info('Time for running the LSH model was: {0} min and {1} sec'.format(x[0], x[1]))
+            return False
+            
+        if index % 100 == 0:
+            self.logger.debug('Loaded {} documents'.format(index))
+            
+        return True
+          
+    def process(self, text):
+        
+#        tknzr = TweetTokenizer(preserve_case=False, strip_handles=True)
+#        word_tokens = tknzr.tokenize(text)
+#        text = ' '.join(word_tokens)
+        text = text.replace('\t', ' ').replace('\n', ' ')
+        text = ' '.join(re.sub("(@[A-Za-z0-9]+)|([^0-9A-Za-z \t])|(\w+:\/\/\S+)"," ",text).split())
+        return text.lower().strip()
+        
+        
+#%%        
+n = 6
+hp = 2**n
+maxB = 50
+#dim=3
+tables = 8
+epsilon=0.5
+#%%
+max_threads = 2
+max_docs = 500
+
 #%%
 
-ll.myprint()
-
-
-#%%
-
-import graphlab
-
-sf = SFRame('c:/temp/data.c')
+import sys
+max_docs = int(sys.argv[1])
+preformance_file = 'c:/temp/performance.txt'
+file = open(preformance_file, 'a')
+#file.write('max_docs\tseconds\tminutes\n')
+#for max_docs in range(10000, 20000, 500):
+if True:
+    print('Running LSH with {0} tweets ..... '.format(max_docs), end='')
+    
+    #mongodb
+    host = 'localhost'
+    port = 27017
+    db = 'events2012'
+    collection = 'posts'
+    #db = 'test'
+    #collection = 'test'
+    
+    log_filename = 'c:/temp/log_test4.log'
+    threads_filename = 'c:/temp/threads_test4.txt'
+    
+    #%%
+    logger = simplelogger()
+    logger.init(filename=log_filename, std_level=simplelogger.ERROR, file_level=simplelogger.ERROR, profiling=False)
+    #logger = init_log(log_filename, std_level=simplelogger.INFO, file_level=simplelogger.DEBUG)
+    
+    #%%
+    start = time.time()
+    lshmodel = NED_LSH_model()
+    lshmodel.init( logger, hp, tables, max_bucket_size=maxB, dimension=3, epsilon=epsilon)
+    
+    
+    #streamer = TextStreamer(logger)
+    #streamer.init('C:\data\_Personal\DataScientist\datasets\Italy1.json')
+    
+    streamer = MongoDBStreamer(logger)
+    streamer.init(host, port, db, collection)
+    
+    listener = TextListener(logger)
+    listener.init(lshmodel, max_docs)
+    
+    streamer.register(listener)
+    streamer.start()
+    
+    nn = len(listener.text_data)
+    logger.info('Loaded {} text documents.'.format(nn))
+    
+    #%%
+        
+    _thr = lshmodel.dumpThreads(threads_filename, max_threads)
+    
+    logger.info('print profiling!')
+    
+    logger.profiling_dump()
+    
+    logger.info('I am done!')
+    measured_time = time.time() - start
+    
+    print('done with {0:.2f} seconds (= {1:.2f} minutes)'.format(measured_time, measured_time/60), )
+    file.write('{0}\t{1}\t{2}\n'.format(max_docs, measured_time, measured_time/60))
+    #%%
+    #print (type(listener.text_data))
+    #
+    #print (listener.text_data[5])
+    #print (lshmodel.counts[5, :])
+    #print (lshmodel.count_vect.get_feature_names()[572])
+    
+    #lshmodel.lsh.myprint()
+    
+    
+    
+        
+    #%%
+    logger.info('Done.')
+    logger.close()
+    
+file.close()
