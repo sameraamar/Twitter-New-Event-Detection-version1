@@ -296,7 +296,7 @@ class HashtableLSH:
         
         self.logger.exit('HashtableLSH.add_all2')    
         items = []
-        for index in doc_indices:
+        for index in range(len(doc_indices)):
             point = points[index, :]
             ID = id_list[index]
             hashcode = self.hashcodes[index]
@@ -441,13 +441,11 @@ class LSH:
 
     def add_all(self, doc_indices, points):
         self.logger.entry('LSH.add_all')        
-        print ('add_all', time.time())
         invokes = []
         for table in self.hList:
             invokes.append( (table.add_all, doc_indices, points) )
             #table.add_all(doc_indices, points)
         multirun.run_all(invokes)
-        print ('add_all - done', time.time())
         self.logger.entry('LSH.add_all')        
 
     def add_all2(self, doc_indices, points, id_list):
@@ -458,14 +456,16 @@ class LSH:
         return results
 
     def add_single(self, table, ID, point):
+        self.logger.entry('LSH.add_single')        
         item = table.add(ID, point)
         
         if True:
             candidateNeighbor, dist, bucket_size = table.findNearest(item)            
-        return ID, candidateNeighbor, dist, bucket_size 
+        self.logger.exit('LSH.add_single')        
+        return candidateNeighbor, dist, bucket_size 
         
     def add(self, ID, point):
-        self.logger.entry('LSH.add')        
+        self.logger.entry('LSH.add-a')        
         """add a point to the hash table
         the format of the point is assumed to be parse so it will be in libSVM format
         json {word:count, word:cout}"""
@@ -473,20 +473,24 @@ class LSH:
         nearestDist = None
         comparisons = 0
         invokes = []
+        results = []
         for table in self.hList:
-            invokes.append( ( self.add_single, table, ID, point) )
-        results = multirun.run_all(invokes)
+            candidateNeighbor, dist, bucket_size  = self.add_single(table, ID, point)
+            results.append((candidateNeighbor, dist, bucket_size ))
+            #invokes.append( ( self.add_single, table, ID, point) )
+        #results = multirun.run_all(invokes)
         
-        #print('debug: ' + str(results))
+        self.logger.exit('LSH.add-a')        
+        self.logger.entry('LSH.add-b')        
         if True:
-            for id1, candidateNeighbor, dist, bucket_size in results:
+            for candidateNeighbor, dist, bucket_size in results:
                 comparisons += bucket_size-1
                 if nearestDist==None or (dist != None and nearestDist>dist):
                     nearest = candidateNeighbor
                     nearestDist = dist
                     
         
-        self.logger.exit('LSH.add')        
+        self.logger.exit('LSH.add-b')        
         return nearest, nearestDist, comparisons
 
     def add1(self, ID, point):

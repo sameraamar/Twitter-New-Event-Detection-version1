@@ -59,6 +59,9 @@ class simplelogger:
     def entry(self, func):
         if not self.profiling:
             return 
+
+        th = threading.current_thread()
+        key = str(th) + func
             
 #        dt = datetime.utcnow()
 #        #datetime.datetime(2012, 12, 4, 19, 51, 25, 362455)
@@ -66,10 +69,10 @@ class simplelogger:
         ts = datetime.utcnow()
         
         th = threading.current_thread()
-        self.helper[str(th) + func] = ts.timestamp()
+        self.helper[key] = ts.timestamp()
 
         #s = datetime.fromtimestamp(ts)
-        self.debug('Entry: {0} at {1}'.format(func, ts))
+        self.debug('Entry: {0} at {1} [Thread {2}]'.format(func, ts, str(th)))
         
     def exit(self, func):
         if not self.profiling:
@@ -84,18 +87,19 @@ class simplelogger:
 
         ts = datetime.utcnow()
 
-        temp, count = self.profiling_res.get(func, (0, 0))
-        self.profiling_res[func] = (temp + ts.timestamp() - entry_time, count+1)
+        temp, count = self.profiling_res.get(key, (0, 0))
+        self.profiling_res[key] = (temp + ts.timestamp() - entry_time, count+1)
 
-        self.debug('Exit: {0} at {1}'.format(func, ts))
+        self.debug('Exit: {0} at {1} [Thread {2}]'.format(func, ts, str(th)))
 
     def profiling_dump(self):
         for func in self.profiling_res:
             seconds, count = self.profiling_res[func]
+            if seconds < 0.01:
+                continue
             mins = int(seconds / 60)
             secs = seconds % 60
             self.info('invoked {1:10} times, total {2}\' {3:.2f}\'\' - {0}'.format(func, count, mins, secs))
-        assert(len(self.profiling_res)>0)
         
     def write(self, handler, levelname, message):
         dt = datetime.now()

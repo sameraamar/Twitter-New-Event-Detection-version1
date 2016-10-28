@@ -71,6 +71,9 @@ class NED_LSH_model:
 #        self.logger.debug ('Adding document {0} ({2}) out of {1}'.format(sample, self.counts.shape[0], ID))
 #        nearest, nearestDist, comparisons = lshmodel.lsh.add_all(self.id_list, self.counts)
         lshmodel.lsh.add_all(self.doc_indices, self.counts)
+        #lshmodel.lsh.add_all2(self.doc_indices, self.counts, self.id_list)
+
+
         block = nn / 20
         for sample in range(nn):
             ID = self.id_list[sample]
@@ -247,6 +250,11 @@ class TextListener(Listener):
     def init(self, lshmodel, max_documents):
         self.lshmodel = lshmodel
         self.max_documents = max_documents
+        
+        self.text_data = []
+        self.id_list = []
+        self.text_metadata = {}
+        self.doc_indices = {}        
 
     def act(self, data):
         metadata = {}
@@ -300,69 +308,83 @@ tables = 8
 epsilon=0.5
 #%%
 max_threads = 2
-max_docs = 1000
+max_docs = 500
 
 #%%
 
-#mongodb
-host = 'localhost'
-port = 27017
-db = 'events2012'
-collection = 'posts'
-#db = 'test'
-#collection = 'test'
-
-log_filename = 'c:/temp/log_test4.log'
-threads_filename = 'c:/temp/threads_test4.txt'
-
-#%%
-logger = simplelogger()
-logger.init(filename=log_filename, std_level=simplelogger.INFO, file_level=simplelogger.DEBUG, profiling=True)
-#logger = init_log(log_filename, std_level=simplelogger.INFO, file_level=simplelogger.DEBUG)
-
-#%%
-lshmodel = NED_LSH_model()
-lshmodel.init( logger, hp, tables, max_bucket_size=maxB, dimension=3, epsilon=epsilon)
-
-
-#streamer = TextStreamer(logger)
-#streamer.init('C:\data\_Personal\DataScientist\datasets\Italy1.json')
-
-streamer = MongoDBStreamer(logger)
-streamer.init(host, port, db, collection)
-
-listener = TextListener(logger)
-listener.init(lshmodel, max_docs)
-
-streamer.register(listener)
-streamer.start()
-
-nn = len(listener.text_data)
-logger.info('Loaded {} text documents.'.format(nn))
-
-#%%
+import sys
+max_docs = int(sys.argv[1])
+preformance_file = 'c:/temp/performance.txt'
+file = open(preformance_file, 'a')
+#file.write('max_docs\tseconds\tminutes\n')
+#for max_docs in range(10000, 20000, 500):
+if True:
+    print('Running LSH with {0} tweets ..... '.format(max_docs), end='')
     
-_thr = lshmodel.dumpThreads(threads_filename, max_threads)
-
-logger.info('print profiling!')
-
-logger.profiling_dump()
-
-logger.info('I am done!')
-
-
-#%%
-#print (type(listener.text_data))
-#
-#print (listener.text_data[5])
-#print (lshmodel.counts[5, :])
-#print (lshmodel.count_vect.get_feature_names()[572])
-
-#lshmodel.lsh.myprint()
-
-
+    #mongodb
+    host = 'localhost'
+    port = 27017
+    db = 'events2012'
+    collection = 'posts'
+    #db = 'test'
+    #collection = 'test'
     
-#%%
-logger.info('Done.')
-logger.close()
-
+    log_filename = 'c:/temp/log_test4.log'
+    threads_filename = 'c:/temp/threads_test4.txt'
+    
+    #%%
+    logger = simplelogger()
+    logger.init(filename=log_filename, std_level=simplelogger.ERROR, file_level=simplelogger.ERROR, profiling=False)
+    #logger = init_log(log_filename, std_level=simplelogger.INFO, file_level=simplelogger.DEBUG)
+    
+    #%%
+    start = time.time()
+    lshmodel = NED_LSH_model()
+    lshmodel.init( logger, hp, tables, max_bucket_size=maxB, dimension=3, epsilon=epsilon)
+    
+    
+    #streamer = TextStreamer(logger)
+    #streamer.init('C:\data\_Personal\DataScientist\datasets\Italy1.json')
+    
+    streamer = MongoDBStreamer(logger)
+    streamer.init(host, port, db, collection)
+    
+    listener = TextListener(logger)
+    listener.init(lshmodel, max_docs)
+    
+    streamer.register(listener)
+    streamer.start()
+    
+    nn = len(listener.text_data)
+    logger.info('Loaded {} text documents.'.format(nn))
+    
+    #%%
+        
+    _thr = lshmodel.dumpThreads(threads_filename, max_threads)
+    
+    logger.info('print profiling!')
+    
+    logger.profiling_dump()
+    
+    logger.info('I am done!')
+    measured_time = time.time() - start
+    
+    print('done with {0:.2f} seconds (= {1:.2f} minutes)'.format(measured_time, measured_time/60), )
+    file.write('{0}\t{1}\t{2}\n'.format(max_docs, measured_time, measured_time/60))
+    #%%
+    #print (type(listener.text_data))
+    #
+    #print (listener.text_data[5])
+    #print (lshmodel.counts[5, :])
+    #print (lshmodel.count_vect.get_feature_names()[572])
+    
+    #lshmodel.lsh.myprint()
+    
+    
+    
+        
+    #%%
+    logger.info('Done.')
+    logger.close()
+    
+file.close()
