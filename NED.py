@@ -44,6 +44,7 @@ class NED_LSH_model:
         self.max_bucket_size = max_bucket_size
         self.dimension = dimension
         self.epsilon = epsilon
+        self.threads = {}
 
     def rebuild(self):
         self.lsh = lsh.LSH(logger=self.logger, dimensionSize=self.dimension , numberTables=self.tables, 
@@ -55,6 +56,8 @@ class NED_LSH_model:
         self.id_list = id_list
         self.text_metadata = text_metadata
         self.doc_indices = doc_indices
+        self.threads = {}
+        self.tweet2thread = {}
         
         self.count_vect = CountVectorizer() #stop_words='english')
         self.counts = self.count_vect.fit_transform(text_data)
@@ -114,19 +117,24 @@ class NED_LSH_model:
         for x in sorted(self.threads, key=lambda x: len(self.threads[x]), reverse=True):
             threadSize = len(self.threads[x])
             
+            if threadSize<3:    
+                #not interesting anymore
+                break
+            
             self.logger.info('Thread {0}: has {1} documents'.format(x, threadSize))
             text = self.text_metadata[x]['text'] #.replace('\t', ' ')
             #text = text.encode(encoding='utf-8')
             file.write('\n' + '-'*40 + ' THREAD {0} - {1} documents '.format(thr, threadSize) + '-'*40 + '\n')
             file.write('Leader is {0}: "{1}"\n'.format(x, text))
-            file.write('thread\tleading doc\titem#\titem ID\titem text\titem text(original)\n')
+            file.write('thread\tleading doc\titem#\titem ID\tuser\titem text\titem text(original)\n')
             c = 1
             for item in self.threads[x]:
                 i = self.doc_indices[item]
                 text1 = self.text_data[i]
                 text2 = self.text_metadata[item]['text'] 
+                user = self.text_metadata[item]['user']
             
-                file.write('{0}\t{1}\t{2}\t{3}\t"{4}"\t"{5}"\n'.format( thr, x, c, item, text1, text2 ))
+                file.write('{0}\t{1}\t{2}\t{3}\t{4}\t"{5}"\t"{6}"\n'.format( thr, x, c, item, user, text1, text2 ))
                 c+=1
             thr += 1
             if thr>max_threads:
@@ -198,15 +206,19 @@ import pymongo
 
 class MongoDBStreamer(Action):
     dbcoll = None
+    offset = 0
 
-    def init(self, host, port, dbname, collname):
+    def init(self, host, port, dbname, collname, offset):
         client = MongoClient(host, int(port))
         db = client[dbname]
         self.dbcoll = db[collname]
+        self.offset = offset
  
     def start(self):
         self.logger.entry('MongoDBStreamer.start')
-        for item in self.dbcoll.find().sort("_id", pymongo.ASCENDING):
+        previous = None
+        maxDelta = 0
+        for item in self.dbcoll.find().sort("_id", pymongo.ASCENDING).skip(self.offset):
             # json
             data = item.get('json', None)
             if data == None:
@@ -219,8 +231,15 @@ class MongoDBStreamer(Action):
             itemTimestamp = time.mktime(time.strptime(created_at,"%a %b %d %H:%M:%S +0000 %Y"))
             data['timestamp'] = itemTimestamp
 
-            #dt = datetime.fromtimestamp(itemTimestamp)
-            #data['created_at2'] = dt
+            if previous!=None:
+                delta = data['timestamp'] - previous['timestamp']
+                if delta > maxDelta:
+                    maxDelta = delta
+                    text = 'Delta between tweets is {4}  ---> {0}: {2}. {1}: {3}'.format(data['id_str'], previous['id_str'], data['timestamp'], previous['timestamp'], maxDelta)
+                    self.logger.error(text)
+                
+            previous = data
+
             
             # publish to listeners
             if not self.publish(data):
@@ -262,6 +281,7 @@ class TextListener(Listener):
         
         metadata['retweet'] = (data.get('retweet', None) != None)
         
+        metadata['user'] = data['user']['screen_name']
         metadata['timestamp'] = data['timestamp']
         itemText = data['text']
         itemText = self.process(itemText)
@@ -273,8 +293,12 @@ class TextListener(Listener):
         self.text_metadata[ ID ] = metadata
         self.doc_indices[ ID ] = index
 
+        if index == 1:
+            self.logger.info("First tweet: {}".format(metadata))
+
         if index+1 == self.max_documents:
             before = time.time()
+            self.logger.info("Last tweet: {}".format(metadata))
             self.logger.info('running LSH on {} documents'.format(index+1))
             
             lshmodel.run(self.text_data, self.id_list, self.text_metadata, self.doc_indices)
@@ -295,47 +319,61 @@ class TextListener(Listener):
 #        word_tokens = tknzr.tokenize(text)
 #        text = ' '.join(word_tokens)
         text = text.replace('\t', ' ').replace('\n', ' ')
-        text = ' '.join(re.sub("(@[A-Za-z0-9]+)|([^0-9A-Za-z \t])|(\w+:\/\/\S+)"," ",text).split())
+        
+        text = ' '.join(re.sub("(@[A-Za-z0-9]+)|(#[A-Za-z0-9]+)|([^0-9A-Za-z \t])|(\w+:\/\/\S+)"," ",text).split())
         return text.lower().strip()
         
         
 #%%        
-n = 6
+
+import psutil
+import os
+
+def memory_usage_psutil():
+    # return the memory usage in MB
+    process = psutil.Process(os.getpid())
+    mem = process.memory_info().rss #[0] / float(2 ** 20)
+    return mem
+    
+n = 4
 hp = 2**n
-maxB = 50
+maxB = 50  # should be less than 0.5 of max_docs/(2^hp)
 #dim=3
-tables = 8
+tables = 13
 epsilon=0.5
 #%%
-max_threads = 2
-max_docs = 500
+max_threads = 1000
+max_docs = 10000
 
 #%%
 
 import sys
-max_docs = int(sys.argv[1])
-preformance_file = 'c:/temp/performance.txt'
+if len(sys.argv)>1:
+    max_docs = int(sys.argv[1])
+    
+preformance_file = 'c:/temp/performance-{}.txt'.format(max_docs)
 file = open(preformance_file, 'a')
-#file.write('max_docs\tseconds\tminutes\n')
-#for max_docs in range(10000, 20000, 500):
-if True:
+file.write('max_docs\tseconds\tminutes\tusage\n')
+
+for round in range(0, 30):
+#if True:
     print('Running LSH with {0} tweets ..... '.format(max_docs), end='')
     
     #mongodb
-    host = 'localhost'
+    host = 'localhost' #'192.168.1.100'
     port = 27017
-    db = 'events2012'
-    collection = 'posts'
+    db = 'events2012'#'petrovic'
+    collection = 'posts' #'relevance_judgments'
     #db = 'test'
     #collection = 'test'
     
-    log_filename = 'c:/temp/log_test4.log'
-    threads_filename = 'c:/temp/threads_test4.txt'
+    log_filename = 'c:/temp/{0:07d}_docs_round_{1:02d}.log'.format(max_docs, round)
+    threads_filename = 'c:/temp/{0:07d}_docs_round_{1:02d}_threads.txt'.format(max_docs, round)
     
     #%%
     logger = simplelogger()
-    logger.init(filename=log_filename, std_level=simplelogger.ERROR, file_level=simplelogger.ERROR, profiling=False)
-    #logger = init_log(log_filename, std_level=simplelogger.INFO, file_level=simplelogger.DEBUG)
+    logger.init(filename=log_filename, std_level=simplelogger.INFO, file_level=simplelogger.INFO, profiling=False)
+    #logger.init(filename=log_filename, std_level=simplelogger.INFO, file_level=simplelogger.DEBUG, profiling=False)
     
     #%%
     start = time.time()
@@ -347,7 +385,7 @@ if True:
     #streamer.init('C:\data\_Personal\DataScientist\datasets\Italy1.json')
     
     streamer = MongoDBStreamer(logger)
-    streamer.init(host, port, db, collection)
+    streamer.init(host, port, db, collection, offset=int(round*max_docs/2))
     
     listener = TextListener(logger)
     listener.init(lshmodel, max_docs)
@@ -361,16 +399,17 @@ if True:
     #%%
         
     _thr = lshmodel.dumpThreads(threads_filename, max_threads)
-    
+
     logger.info('print profiling!')
     
     logger.profiling_dump()
     
-    logger.info('I am done!')
     measured_time = time.time() - start
     
-    print('done with {0:.2f} seconds (= {1:.2f} minutes)'.format(measured_time, measured_time/60), )
-    file.write('{0}\t{1}\t{2}\n'.format(max_docs, measured_time, measured_time/60))
+    usage_psutil = memory_usage_psutil()
+
+    logger.info('done with {0:.2f} seconds (= {1:.2f} minutes). usage: {2}'.format(measured_time, measured_time/60, usage_psutil))
+    file.write('{0}\t{1}\t{2}\t{3}\n'.format(max_docs, measured_time, measured_time/60, usage_psutil))
     #%%
     #print (type(listener.text_data))
     #
@@ -386,5 +425,7 @@ if True:
     #%%
     logger.info('Done.')
     logger.close()
-    
+
+    #input('Round {} is done. Press Enter...'.format(round))
+
 file.close()

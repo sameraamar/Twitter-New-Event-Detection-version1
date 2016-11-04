@@ -202,6 +202,7 @@ class HashtableLSH:
     d = 0
     logger = None
     hashcodes = None
+    hashcodes2 = None
     helper = None
     doc_indices = {}
     
@@ -231,7 +232,7 @@ class HashtableLSH:
             p1 = item['point']
             p2 = neighbor['point']
 
-            dist = self.helper.distance_cosine(item['ID'], neighbor['ID'], p1, p2)
+            dist = 1.0-self.helper.distance_cosine(item['ID'], neighbor['ID'], p1, p2)
             if minDist == None or dist < minDist:
                 minDist = dist
                 nearest = neighbor
@@ -275,10 +276,27 @@ class HashtableLSH:
         #debug(self.logger, 'generateHashCode: {}'.format (time.time()-base))
         self.logger.exit('HashtableLSH.generateHashCode')
         return values
-        
+
+    def helper_calc(self, point):
+        result = point.dot(self.hyperPlanes)
+        result[result < 0] = 0
+        result[result > 0] = 1
+            
+        result.eliminate_zeros()
+      
+        return result
+
+
     def add_all(self, doc_indices, points):
         self.logger.entry('HashtableLSH.add_all')        
         self.doc_indices = doc_indices
+        #old version: result1 = map( lambda x: x.dot(self.hyperPlanes) , points )
+        #self.hashcodes2 = map( lambda x: self.helper_calc(x) , points )
+        
+        
+        #for h in self.hashcodes2:
+        #    print(h)
+
         self.hashcodes = points.dot(self.hyperPlanes)
         self.hashcodes[self.hashcodes < 0] = 0
         self.hashcodes[self.hashcodes > 0] = 1
@@ -475,10 +493,10 @@ class LSH:
         invokes = []
         results = []
         for table in self.hList:
-            candidateNeighbor, dist, bucket_size  = self.add_single(table, ID, point)
-            results.append((candidateNeighbor, dist, bucket_size ))
-            #invokes.append( ( self.add_single, table, ID, point) )
-        #results = multirun.run_all(invokes)
+            #candidateNeighbor, dist, bucket_size  = self.add_single(table, ID, point)
+            #results.append((candidateNeighbor, dist, bucket_size ))
+            invokes.append( ( self.add_single, table, ID, point ) )
+        results = multirun.run_all(invokes)
         
         self.logger.exit('LSH.add-a')        
         self.logger.entry('LSH.add-b')        
@@ -586,7 +604,7 @@ if __name__ == '__main__':
         dim = 5
         maxB = 500
         tables = 5
-        nruns = 300
+        nruns = 1000000
         
         logger = init_log()
         helper = MathHelper(logger)
