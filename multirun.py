@@ -7,7 +7,7 @@ Created on Wed Oct 26 09:54:43 2016
 
 
 import threading
-import sys
+import time
  
 class FuncThread(threading.Thread):
     results = None
@@ -20,14 +20,23 @@ class FuncThread(threading.Thread):
         
     def run(self):
         assert( self._target!= None )
-        #print(sys.version )
-        #print(repr(self._args))
-        
-        #self.results = self._target(*( 3, 2)) #, self._args)
         self.results = self._target(*self._args[0])
         
-
-def run_all(func):
+#    def run_all_debug(func):
+#        results = []
+#        for i in range(len(func)):
+#            f = func[i]
+#            param = f[1:]
+#            f = f[0]
+#            res = f(*param)
+#            results.append(res)
+#            
+#        return results
+    
+def run_all(func, debugging=False):
+#        if debugging:
+#            return run_all_debug(func)
+        
     threads = []
 
     for i in range(len(func)):
@@ -53,57 +62,40 @@ def run_all(func):
     #print ('********** threads are done')
     return results
         
-## Example usage
-#def someOtherFunc(data, key):
-#    print ("data=%s; key=%s" % (str(data), str(key)))
-#    c = 1
-#    while(True):
-#        c += 1
-#        if c % 10000000 == 0:
-#            break
-#    print ('Finished')
-#    
-#threads = []
-#    
-#t1 = FuncThread(someOtherFunc, [1,2], 6)
-#t1.start()
-#threads.append(t1)
-#
-#t2 = FuncThread(someOtherFunc, [1,2], 6)
-#t2.start()
-#threads.append(t2)
-#
-## Wait for all threads to complete
-#for t in threads:
-#    t.join()
 
 if __name__ == '__main__':
     def func1(data, key):
-        print ("data={0}; key={1}".format(str(data), str(key)))
+        #print ("data={0}; key={1}".format(str(data), str(key)))
         c = 0
-        while(True):
+        for i in range(50000):
             c += data
-            if c % key == 0:
-                break
+
         return c
         
     def func2(data, key):
-        print ("data={0}; key={1}".format(str(data), str(key)))
+        #print ("data={0}; key={1}".format(str(data), str(key)))
         c = 1
         m = 1
-        while(True):
+        for i in range(50000):
             m *= c
             c += 1
-            print(c, key)
-            if c % key == 0:
-                break
+            #print(c, key)
+
         return c,m
         
     print('\nregular call:\n')
-    print(func1(34, 2))
-    print(func2(3, 2))
+    base = time.time()
+    for i in range(10):
+        func1(34, 2)
+        func2(3, 2)
+    
+    print('spent: ' + str(time.time() - base) + ' seconds')
     print('\nnow let\'s try with threads:\n')
     
-    results = run_all([ (func1, 34, 2) , [func2, 3, 2] ] )
-    print (results)
+    base = time.time()
+    for i in range(10):
+        run_all([ (func1, 34, 2) , [func2, 3, 2] ] )
+        
+    print('spent: ' + str(time.time() - base) + ' seconds')
+    
     
