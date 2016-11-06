@@ -161,6 +161,10 @@ class MathHelper:
         sum_a = self.norm(id1, a)
         sum_b = self.norm(id2, b)
     
+        #flag1 = np.isfinite(dot_prod).all()
+        #flag2 = np.isfinite(sum_a*sum_b).all()
+        #assert(flag1 and flag2)
+        
         cosine = dot_prod/(sum_a*sum_b) # cosine similarity
 
         #rounding issue!
@@ -477,8 +481,7 @@ class LSH:
         self.logger.entry('LSH.add_single')        
         item = table.add(ID, point)
         
-        if True:
-            candidateNeighbor, dist, bucket_size = table.findNearest(item)            
+        candidateNeighbor, dist, bucket_size = table.findNearest(item)            
         self.logger.exit('LSH.add_single')        
         return candidateNeighbor, dist, bucket_size 
         
@@ -490,23 +493,23 @@ class LSH:
         nearest = None
         nearestDist = None
         comparisons = 0
-        invokes = []
+        #invokes = []
         results = []
         for table in self.hList:
-            #candidateNeighbor, dist, bucket_size  = self.add_single(table, ID, point)
-            #results.append((candidateNeighbor, dist, bucket_size ))
-            invokes.append( ( self.add_single, table, ID, point ) )
-        results = multirun.run_all(invokes)
+            candidateNeighbor, dist, bucket_size  = self.add_single(table, ID, point)
+            results.append((candidateNeighbor, dist, bucket_size ))
+            #invokes.append( ( self.add_single, table, ID, point ) )
+        #results = multirun.run_all(invokes)
         
         self.logger.exit('LSH.add-a')        
         self.logger.entry('LSH.add-b')        
-        if True:
-            for candidateNeighbor, dist, bucket_size in results:
-                comparisons += bucket_size-1
-                if nearestDist==None or (dist != None and nearestDist>dist):
-                    nearest = candidateNeighbor
-                    nearestDist = dist
-                    
+
+        for candidateNeighbor, dist, bucket_size in results:
+            comparisons += bucket_size-1
+            if nearestDist==None or (dist != None and nearestDist>dist):
+                nearest = candidateNeighbor
+                nearestDist = dist
+                
         
         self.logger.exit('LSH.add-b')        
         return nearest, nearestDist, comparisons

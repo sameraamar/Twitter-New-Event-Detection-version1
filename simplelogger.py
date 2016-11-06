@@ -10,10 +10,12 @@ import numpy as np
 import threading
 
 class simplelogger:
-    DEBUG = 3
-    INFO = 2
-    WARN = 1
-    ERROR = 0
+    DEBUG = 4
+    INFO = 3
+    WARN = 2
+    ERROR = 1
+    CRITICAL = 0
+	
     handlers = None
     loglevels= None
     profiling = False
@@ -45,11 +47,21 @@ class simplelogger:
             if self.checklevel(self.DEBUG, i):
                 self.write(i, 'DEBUG', message)
                 
+    def warning(self, message):
+        for i in range(len(self.loglevels)):
+            if self.checklevel(self.WARN, i):
+                self.write(i, 'WARNING', message)
+                    
     def error(self, message):
         for i in range(len(self.loglevels)):
             if self.checklevel(self.ERROR, i):
                 self.write(i, 'ERROR', message)
-    
+                
+    def critical(self, message):
+        for i in range(len(self.loglevels)):
+            if self.checklevel(self.CRITICAL, i):
+                self.write(i, 'CRITICAL', message)
+        
     def turn_profiling(self, on=True):
         if on and not self.profiling:
             self.profiling_res = {}
@@ -106,24 +118,14 @@ class simplelogger:
         text = '{:{dfmt} {tfmt}}'.format(dt, dfmt='%Y-%m-%d', tfmt='%H:%M')
         text += ' ' + levelname + ': ' + message + '\n'
         
-        self.handlers[handler].write(text)
-        
-#    def debug(self, message):
-#        if self.loglevel >= self.DEBUG:
-#            dt = datetime.datetime.now()
-#            text = 'DEBUG:'
-#            text += '{:{dfmt} {tfmt}}'.format(dt, dfmt='%Y-%m-%d', tfmt='%H:%M:%S')
-#            text += ' - ' + message + '\n'
-#            
-#            self.handler.write ( text)
-#        
-#    def error(self, message):
-#        if self.loglevel >= self.ERROR:
-#            dt = datetime.datetime.now()
-#            text = 'ERROR:'
-#            text += '{:{dfmt} {tfmt}}'.format(dt, dfmt='%Y-%m-%d', tfmt='%H:%M')
-#            text += ' ' + message + '\n'
-#            self.handler.write (text)
+        try:
+            self.handlers[handler].write(text)
+        except UnicodeEncodeError as e:
+            tmp = text.encode('ascii', 'ignore')
+            tmp = tmp.decode('utf-8')
+            self.handlers[handler].write(tmp)
+            #print('do something')
+            #raise
         
     def close(self):
         if self.handlers[1] != None:
