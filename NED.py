@@ -440,10 +440,9 @@ def memory_usage_psutil():
     mem = process.memory_info().rss #[0] / float(2 ** 20)
     return mem
     
-k = 20 #2**n
+k = 20
 maxB = 50  # should be less than 0.5 of max_docs/(2^k)
-#dim=3
-tables = 50
+tables = 64
 epsilon=0.55
 #%%
 max_threads = 1000
