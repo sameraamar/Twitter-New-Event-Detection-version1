@@ -46,6 +46,12 @@ class NED_LSH_model:
         self.hyper_planes = hyper_planes
         self.tables = tables
         self.max_bucket_size = max_bucket_size
+        self.tweet2thread = {}
+        self.text_data = []
+        self.doc_indices = {}
+        self.lsh = None
+        self.id_list = []
+        self.text_metadata = {}
         self.dimension = dimension
         self.epsilon = epsilon
         self.threads = {}
@@ -232,7 +238,7 @@ class NED_LSH_model:
                 user = self.text_metadata[item]['user']
                 nearID = self.threads_queue[x].document_contents[item][1]
                 nearestDist = self.threads_queue[x].document_contents[item][2]
-                file.write('{0}\t{1}\t{2}\t{3}\t{7}\t{8}\t{4}\t"{5}"\t"{6}"\n'.format( thr, x, c, item, user, text1, text2, nearID, nearestDist ))
+                file.write('{0}\t{1}\t{2}\t{3}\t{4}\t{7}\t{8}\t"{5}"\t"{6}"\n'.format( thr, x, c, item, user, text1, text2, nearID, nearestDist ))
                 c+=1
             thr += 1
             if thr>max_threads:
@@ -453,7 +459,7 @@ collection = 'posts' #'relevance_judgments'
 #collection = 'test'
 
 min_rounds = 0
-max_rounds = 3
+max_rounds = 10
 
 import sys
 if len(sys.argv)>1:
