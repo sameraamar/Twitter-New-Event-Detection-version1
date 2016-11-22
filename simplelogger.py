@@ -6,7 +6,6 @@ Created on Sun Oct 23 14:01:57 2016
 """
 from datetime import datetime
 import sys
-import numpy as np
 import threading
 
 class simplelogger:
@@ -22,7 +21,7 @@ class simplelogger:
     profiling_res = {}
     helper = {}
 
-    def init(self, filename=None, std_level=INFO, file_level=DEBUG, profiling=False):
+    def init(self, filename=None, std_level=INFO, file_level=DEBUG, profiling=False, bufsize = 10):
         self.loglevels = [std_level, file_level]
 
         self.profiling_res = {}
@@ -118,17 +117,27 @@ class simplelogger:
         text = '{:{dfmt} {tfmt}}'.format(dt, dfmt='%Y-%m-%d', tfmt='%H:%M')
         text += ' ' + levelname + ': ' + message + '\n'
         
+
+        #if 'c:/temp/0000010_docs_round_00.log' == self.handlers[1].name:
+        #    debug = 1
+
         try:
             self.handlers[handler].write(text)
         except UnicodeEncodeError as e:
             tmp = text.encode('ascii', 'ignore')
             tmp = tmp.decode('utf-8')
             self.handlers[handler].write(tmp)
-            #print('do something')
-            #raise
+        except Exception as unexpected:
+            #print('Received error ({0}) while writing to log file ({2})'.format(unexpected, text, self.handlers[handler]))
+            raise
         
+    def flush(self):
+        if self.handlers[1] != None:
+            self.handlers[1].flush() #.close()
+            
     def close(self):
         if self.handlers[1] != None:
             self.handlers[1].close()
+            #print('Log file ({0}) is closed now'.format(self.handlers[1]))
             
 

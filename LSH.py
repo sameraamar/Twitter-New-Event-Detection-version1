@@ -12,6 +12,9 @@ from scipy import stats
 import numpy as np
 import multirun
 
+from sklearn.metrics.pairwise import cosine_similarity
+
+
 def debug(logger, message):
     logger.debug(message)
 
@@ -62,8 +65,8 @@ class MathHelper:
         self.logger = logger
 
     def clear(self):
-        global norm_values 
-        norm_values = {}
+        global cache_values 
+        cache_values = {}
 
     def randomPoint(self, features):
         return self.randomSamples(1, features)
@@ -84,7 +87,7 @@ class MathHelper:
     '''compute norm of a sparse vector'''
     def norm(self, id1, x):
         global cache_values
-        norm1 = norm_values.get(id1, None)
+        norm1 = cache_values.get(id1, None)
         
         #self.logger.debug('Calculating norm: {0}: --> {1}:\n{2}\n'.format(id1, norm1, x))
         
@@ -118,7 +121,7 @@ class MathHelper:
         
         global cache_values
         
-        dot = norm_values.get(key1, norm_values.get(key2, None))
+        dot = cache_values.get(key1, cache_values.get(key2, None))
         if dot != None:
             self.logger.debug('Pingo: {0}*{1} = {2}'.format(id1, id2, dot))
             return dot
@@ -128,17 +131,12 @@ class MathHelper:
         return res
     
     def distance_cosine(self, id1, id2, a,b):
+        
+
+
         res = self.angular_distance(id1, id2, a, b)
         return res
         
-    #    base = time.time()
-    #    #a= a.toarray()
-    #    #b = b.toarray()
-    #    res = spatial.distance.cosine(a, b)
-    #    return res
-    
-    # angular similarity using definitions
-    # http://en.wikipedia.org/wiki/Cosine_similarity
     def angular_distance(self, id1, id2, a,b):
         key1 = '{0}-{1}'.format(id1, id2)
         key2 = '{1}-{0}'.format(id1, id2)
@@ -150,11 +148,36 @@ class MathHelper:
             self.logger.debug('Pingo: {0}-{1} = {2}'.format(id1, id2, cache_dist))
             return cache_dist
         
-        m = 0
-        nonzeros = np.nonzero(a)
-        if nonzeros != None:
-            for i in nonzeros[1]:
-                m += a[0, i]*b[0, i]
+        dist = 1-cosine_similarity(a, b)[0][0]
+        cache_values[key1] = dist
+
+        return dist
+  
+
+    #    base = time.time()
+    #    #a= a.toarray()
+    #    #b = b.toarray()
+    #    res = spatial.distance.cosine(a, b)
+    #    return res
+    
+    # angular similarity using definitions
+    # http://en.wikipedia.org/wiki/Cosine_similarity
+    def angular_distance2(self, id1, id2, a,b):
+        key1 = '{0}-{1}'.format(id1, id2)
+        key2 = '{1}-{0}'.format(id1, id2)
+        
+        global cache_values
+        
+        cache_dist = cache_values.get(key1, cache_values.get(key2, None))
+        if cache_dist != None:
+            self.logger.debug('Pingo: {0}-{1} = {2}'.format(id1, id2, cache_dist))
+            return cache_dist
+        
+        #m = 0
+        #nonzeros = np.nonzero(a)
+        #if nonzeros != None:
+        #    for i in nonzeros[1]:
+        #        m += a[0, i]*b[0, i]
     
         dot_prod = self.dotProduct(id1, id2, a, b) #a.dot(b)[0,0]
         
@@ -184,7 +207,7 @@ class MathHelper:
             else:
                 print ('more than 1')
                 
-            print (norm_values)
+            #print (cache_values)
             raise Exception("Error!")
         
         dist = (theta/math.pi)
@@ -235,8 +258,9 @@ class HashtableLSH:
                 continue
             p1 = item['point']
             p2 = neighbor['point']
-
-            dist = 1.0-self.helper.distance_cosine(item['ID'], neighbor['ID'], p1, p2)
+            #samer: rename the following to similarity OR remove '1-' from this. I chose to remove the '1-' and keep it
+            #as distance value rather than similarity value
+            dist = self.helper.distance_cosine(item['ID'], neighbor['ID'], p1, p2)
             if minDist == None or dist < minDist:
                 minDist = dist
                 nearest = neighbor
@@ -260,7 +284,7 @@ class HashtableLSH:
             hashcode = self.hashcodes[index,:]
 
         
-        asstr = hashcode.A.astype('S1').tostring()
+        asstr = hashcode.A.astype('S1').tostring().decode('utf-8')
         
 #        nonzeros = np.nonzero(hashcode)
 #        asstr = ['0']*self.hyperPlanesNumber
@@ -309,34 +333,34 @@ class HashtableLSH:
         
         self.logger.exit('HashtableLSH.add_all')        
     
-    def add_all2(self, doc_indices, points, id_list):
-        self.logger.entry('HashtableLSH.add_all2')        
-        #reuse hashcodes table
-        
-        
-        # calculate string per hashcode
-        
-        self.logger.exit('HashtableLSH.add_all2')    
-        items = []
-        for index in range(len(doc_indices)):
-            point = points[index, :]
-            ID = id_list[index]
-            hashcode = self.hashcodes[index]
-            
-            item = {}
-            item['ID'] = ID
-            item['point'] = point
-            item['hashcode'] = hashcode
-            b = self.buckets.get(hashcode, [])
-            b.append( item ) 
-            if len(b) > self.maxBucketSize:
-                b = b[1:]
-                self.total -= 1
-            
-            self.buckets[hashcode] = b
-            items.append(item)
-            
-        return items
+#    def add_all2(self, doc_indices, points, id_list):
+#        self.logger.entry('HashtableLSH.add_all2')        
+#        #reuse hashcodes table
+#        
+#        
+#        # calculate string per hashcode
+#        
+#        self.logger.exit('HashtableLSH.add_all2')    
+#        items = []
+#        for index in range(len(doc_indices)):
+#            point = points[index, :]
+#            ID = id_list[index]
+#            hashcode = self.hashcodes[index]
+#            
+#            item = {}
+#            item['ID'] = ID
+#            item['point'] = point
+#            item['hashcode'] = hashcode
+#            b = self.buckets.get(hashcode, [])
+#            b.append( item ) 
+#            if len(b) > self.maxBucketSize:
+#                b = b[1:]
+#                self.total -= 1
+#            
+#            self.buckets[hashcode] = b
+#            items.append(item)
+#            
+#        return items
         
     def add(self, ID, point):
         self.logger.entry('HashtableLSH.add')        
@@ -465,17 +489,17 @@ class LSH:
         self.logger.entry('LSH.add_all')        
         invokes = []
         for table in self.hList:
-            invokes.append( (table.add_all, doc_indices, points) )
-            #table.add_all(doc_indices, points)
-        multirun.run_all(invokes)
+            #invokes.append( (table.add_all, doc_indices, points) )
+            table.add_all(doc_indices, points)
+        #multirun.run_all(invokes)
         self.logger.entry('LSH.add_all')        
 
-    def add_all2(self, doc_indices, points, id_list):
-        results = []
-        for table in self.hList:
-            res = table.add_all2(doc_indices, points, id_list)
-            results.append(res)
-        return results
+#    def add_all2(self, doc_indices, points, id_list):
+#        results = []
+#        for table in self.hList:
+#            res = table.add_all2(doc_indices, points, id_list)
+#            results.append(res)
+#        return results
 
     def add_single(self, table, ID, point):
         self.logger.entry('LSH.add_single')        
@@ -579,8 +603,27 @@ class LSH:
 
 
 #%%
+
+from simplelogger import simplelogger 
+from time import time
+
 if __name__ == '__main__':
+    logger = simplelogger()
+    logger.init('c:/temp/file3.log', file_level=simplelogger.INFO, std_level=simplelogger.INFO, profiling=True)
+
+    dim = 3
+    
+    h = MathHelper(logger=logger)
+    p1 = h.randomPoint(dim)
+    p2 = h.randomPoint(dim)
+    
+    res = h.angular_distance("ID1", "ID2", p1, p2)
+    print(res)
+
+
+if False and __name__ == '__main__':  
   
+
 
     from simplelogger import simplelogger 
     from time import time
@@ -677,3 +720,5 @@ if __name__ == '__main__':
 #    print S, S.getnnz()
     
     logger.close()
+
+
