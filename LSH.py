@@ -12,6 +12,9 @@ from scipy import stats
 import numpy as np
 import multirun
 
+
+
+
 def debug(logger, message):
     logger.debug(message)
 
@@ -62,8 +65,8 @@ class MathHelper:
         self.logger = logger
 
     def clear(self):
-        global norm_values 
-        norm_values = {}
+        global cache_values 
+        cache_values = {}
 
     def randomPoint(self, features):
         return self.randomSamples(1, features)
@@ -84,7 +87,7 @@ class MathHelper:
     '''compute norm of a sparse vector'''
     def norm(self, id1, x):
         global cache_values
-        norm1 = norm_values.get(id1, None)
+        norm1 = cache_values.get(id1, None)
         
         #self.logger.debug('Calculating norm: {0}: --> {1}:\n{2}\n'.format(id1, norm1, x))
         
@@ -118,7 +121,7 @@ class MathHelper:
         
         global cache_values
         
-        dot = norm_values.get(key1, norm_values.get(key2, None))
+        dot = cache_values.get(key1, cache_values.get(key2, None))
         if dot != None:
             self.logger.debug('Pingo: {0}*{1} = {2}'.format(id1, id2, dot))
             return dot
@@ -184,7 +187,7 @@ class MathHelper:
             else:
                 print ('more than 1')
                 
-            print (norm_values)
+            print (cache_values)
             raise Exception("Error!")
         
         dist = (theta/math.pi)
@@ -260,7 +263,7 @@ class HashtableLSH:
             hashcode = self.hashcodes[index,:]
 
         
-        asstr = hashcode.A.astype('S1').tostring()
+        asstr = hashcode.A.astype('S1').tostring().decode('utf-8')
         
 #        nonzeros = np.nonzero(hashcode)
 #        asstr = ['0']*self.hyperPlanesNumber
@@ -309,34 +312,34 @@ class HashtableLSH:
         
         self.logger.exit('HashtableLSH.add_all')        
     
-    def add_all2(self, doc_indices, points, id_list):
-        self.logger.entry('HashtableLSH.add_all2')        
-        #reuse hashcodes table
-        
-        
-        # calculate string per hashcode
-        
-        self.logger.exit('HashtableLSH.add_all2')    
-        items = []
-        for index in range(len(doc_indices)):
-            point = points[index, :]
-            ID = id_list[index]
-            hashcode = self.hashcodes[index]
-            
-            item = {}
-            item['ID'] = ID
-            item['point'] = point
-            item['hashcode'] = hashcode
-            b = self.buckets.get(hashcode, [])
-            b.append( item ) 
-            if len(b) > self.maxBucketSize:
-                b = b[1:]
-                self.total -= 1
-            
-            self.buckets[hashcode] = b
-            items.append(item)
-            
-        return items
+#    def add_all2(self, doc_indices, points, id_list):
+#        self.logger.entry('HashtableLSH.add_all2')        
+#        #reuse hashcodes table
+#        
+#        
+#        # calculate string per hashcode
+#        
+#        self.logger.exit('HashtableLSH.add_all2')    
+#        items = []
+#        for index in range(len(doc_indices)):
+#            point = points[index, :]
+#            ID = id_list[index]
+#            hashcode = self.hashcodes[index]
+#            
+#            item = {}
+#            item['ID'] = ID
+#            item['point'] = point
+#            item['hashcode'] = hashcode
+#            b = self.buckets.get(hashcode, [])
+#            b.append( item ) 
+#            if len(b) > self.maxBucketSize:
+#                b = b[1:]
+#                self.total -= 1
+#            
+#            self.buckets[hashcode] = b
+#            items.append(item)
+#            
+#        return items
         
     def add(self, ID, point):
         self.logger.entry('HashtableLSH.add')        
@@ -470,12 +473,12 @@ class LSH:
         multirun.run_all(invokes)
         self.logger.entry('LSH.add_all')        
 
-    def add_all2(self, doc_indices, points, id_list):
-        results = []
-        for table in self.hList:
-            res = table.add_all2(doc_indices, points, id_list)
-            results.append(res)
-        return results
+#    def add_all2(self, doc_indices, points, id_list):
+#        results = []
+#        for table in self.hList:
+#            res = table.add_all2(doc_indices, points, id_list)
+#            results.append(res)
+#        return results
 
     def add_single(self, table, ID, point):
         self.logger.entry('LSH.add_single')        
@@ -579,11 +582,56 @@ class LSH:
 
 
 #%%
+
+from simplelogger import simplelogger 
+from time import time
+from sklearn.metrics.pairwise import cosine_similarity
+
+
 if __name__ == '__main__':
+    logger = simplelogger()
+    logger.init('c:/temp/file3.log', file_level=simplelogger.INFO, std_level=simplelogger.INFO, profiling=True)
+
+    dim = 3
+    
+    h = MathHelper(logger=logger)
+    p1 = h.randomPoint(dim)
+    
+    p1[0, 0] = 0   
+    p1[0, 1] = 2  
+    p1[0, 2] = 0
+
+    p2 = h.randomPoint(dim)
+    p2[0, 0] = 2   
+    p2[0, 1] = 222
+    p2[0, 2] = 3
+
+    
+    print (p1)
+    print (p2)
+    res = h.angular_distance("ID1", "ID2", p1, p2)
+    
+    print(2*res)
+    
+    similarities = cosine_similarity(p1, p2)[0][0]
+    print(1-similarities)
+
+
+    from mpl_toolkits.mplot3d import Axes3D
+    import matplotlib.pyplot as plt
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(p1, p2, c='r', marker='o')
+
+    ax.set_xlabel('X Label')
+    ax.set_ylabel('Y Label')
+    ax.set_zlabel('Z Label')
+
+    plt.show()
+    
+if False and __name__ == '__main__':  
   
 
-    from simplelogger import simplelogger 
-    from time import time
     
     def init_log():
         #logging.config.fileConfig('logging.conf')

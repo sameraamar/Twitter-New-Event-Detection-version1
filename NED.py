@@ -211,6 +211,40 @@ class NED_LSH_model:
         #return self.threads_queue[x].entropy()
     
     def jsonify(self, max_threads):
+        threads = self.jsonify_threads(max_threads)
+        tables = {}
+        i = 1
+        tables['dimension'] = self.lsh.dimSize
+        tables['tables'] = []
+        for table in self.lsh.hList:
+            data = {}
+            data['hyperplanes'] = []
+            #for hp in table.hyperPlanes:
+            #    data['hyperplanes'].append ( hp)
+            
+            data['buckets'] = []
+            data['count'] = len(table.buckets)
+            sorted_keys = table.buckets.keys()
+            for b in sorted(sorted_keys, reverse=False):
+                bucket_data = {}
+                bucket_data['hashcode'] = b
+                
+                temp = table.buckets[b] 
+                bucket_data['documents'] = []
+                for neighbor in temp:
+                    tmp = {}
+                    tmp['ID'] = neighbor['ID'] 
+                    tmp['text'] = self.text_metadata[tmp['ID']]['text']
+                    bucket_data['documents'].append(tmp)
+
+                data['buckets'].append ( bucket_data )
+                
+            tables['tables'].append(data)
+            i += 1
+
+        return threads, tables
+        
+    def jsonify_threads(self, max_threads):
         data = {}
 
         data['thread_timeslot'] = self.last_timestamp - self.first_timestamp
