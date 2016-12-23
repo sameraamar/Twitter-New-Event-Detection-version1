@@ -89,7 +89,7 @@ class NED_LSH_model:
         
 #        self.logger.debug ('Adding document {0} ({2}) out of {1}'.format(sample, self.counts.shape[0], ID))
 #        nearest, nearestDist, comparisons = lshmodel.lsh.add_all(self.id_list, self.counts)
-        lshmodel.lsh.add_all(self.doc_indices, self.counts)
+        self.lsh.add_all(self.doc_indices, self.counts)
         #lshmodel.lsh.add_all2(self.doc_indices, self.counts, self.id_list)
 
 
@@ -99,7 +99,7 @@ class NED_LSH_model:
             doc = self.counts[sample, :]
 
             self.logger.debug ('Adding document {0} ({2}) out of {1}'.format(sample, self.counts.shape[0], ID))
-            nearest, nearestDist, comparisons = lshmodel.lsh.add(ID, doc)
+            nearest, nearestDist, comparisons = self.lsh.add(ID, doc)
             
             data = text_metadata[ID]
             if self.first_timestamp == None:
@@ -209,6 +209,93 @@ class NED_LSH_model:
     def helper_lambda(self, x):
         return '-'.join( [str(self.threads_queue[x].entropy()) , str(self.threads_queue[x].users_count()) ] )
         #return self.threads_queue[x].entropy()
+    
+    def jsonify(self, max_threads):
+        threads = self.jsonify_threads(max_threads)
+        tables = {}
+        i = 1
+        tables['dimension'] = self.lsh.dimSize
+        tables['tables'] = []
+        for table in self.lsh.hList:
+            data = {}
+            data['hyperplanes'] = []
+            #for hp in table.hyperPlanes:
+            #    data['hyperplanes'].append ( hp)
+            
+            data['buckets'] = []
+            data['count'] = len(table.buckets)
+            sorted_keys = table.buckets.keys()
+            for b in sorted(sorted_keys, reverse=False):
+                bucket_data = {}
+                bucket_data['hashcode'] = b
+                
+                temp = table.buckets[b] 
+                bucket_data['documents'] = []
+                for neighbor in temp:
+                    tmp = {}
+                    tmp['ID'] = neighbor['ID'] 
+                    tmp['text'] = self.text_metadata[tmp['ID']]['text']
+                    bucket_data['documents'].append(tmp)
+
+                data['buckets'].append ( bucket_data )
+                
+            tables['tables'].append(data)
+            i += 1
+
+        return threads, tables
+        
+    def jsonify_threads(self, max_threads):
+        data = {}
+
+        data['thread_timeslot'] = self.last_timestamp - self.first_timestamp
+        data['threads_count'] = min(max_threads, len(self.threads_queue) )
+        data['_list_'] = []
+        thr = 1
+        for x in sorted(self.threads_queue, key=lambda x: self.helper_lambda(x), reverse=True):
+            thread = {}
+            threadSize = self.threads_queue[x].size()
+            
+            #if threadSize<3:    
+            #    #not interesting anymore
+            #    break
+            
+            text = self.text_metadata[x]['text'] 
+            thread['leader_id'] = x
+            thread['leader_text'] = text
+            thread['size'] = threadSize
+            thread['entropy'] = self.threads_queue[x].entropy()
+            thread['users'] = self.threads_queue[x].users_count()
+            thread['speed(sec)'] = self.threads_queue[x].thread_time()
+            
+            array = []
+            c = 1
+            for item in self.threads_queue[x].idlist:
+                i = self.doc_indices[item]
+                text1 = self.text_data[i]
+                text2 = self.text_metadata[item]['text'] 
+                user = self.text_metadata[item]['user']
+                nearID = self.threads_queue[x].document_contents[item][1]
+                nearestDist = self.threads_queue[x].document_contents[item][2]
+                doc = {}
+                doc['index'] = c
+                doc['id'] = item
+                doc['user'] = user
+                doc['text_original'] = text2
+                doc['text_clean'] = text1
+                doc['user'] = user
+                doc['nearest'] = nearID
+                doc['distance'] = nearestDist
+                
+                array.append( doc )
+                c+=1
+            thread['list'] = array
+            
+            thr += 1
+            data['_list_'].append(thread)
+            if thr>max_threads:
+                break
+        
+        return data
         
     def dumpThreads3(self, filename, max_threads):
         self.logger.entry('dumpThreads')
@@ -358,9 +445,7 @@ class MongoDBStreamer(Action):
 
         
 from sklearn.feature_extraction.text import CountVectorizer
-import simple_twitter_parser
-
-#from nltk.tokenize import TweetTokenizer
+from simple_twitter_parser import preprocess
 
         
 class TextListener(Listener):
@@ -382,6 +467,12 @@ class TextListener(Listener):
         self.doc_indices = {}        
 
     def act(self, data):
+        itemText = data['text']
+        itemText = self.process(itemText)
+        
+        if len(itemText) == 0:
+            return True
+
         metadata = {}
         ID = data['id_str']
         
@@ -390,8 +481,6 @@ class TextListener(Listener):
         metadata['user'] = data['user']['screen_name']
         metadata['timestamp'] = data['timestamp']
 
-        itemText = data['text']
-        itemText = self.process(itemText)
         metadata['text'] = data['text'].replace('\t', ' ').replace('\n', '. ')
         self.text_data.append( itemText )
         self.id_list.append ( ID )
@@ -408,7 +497,7 @@ class TextListener(Listener):
             self.logger.info("Last tweet: {}".format(metadata))
             self.logger.info('running LSH on {} documents'.format(index+1))
             
-            lshmodel.run(self.text_data, self.id_list, self.text_metadata, self.doc_indices)
+            self.lshmodel.run(self.text_data, self.id_list, self.text_metadata, self.doc_indices)
             x = time.time()-before
             x = (int(x/60), int(x)%60)
 
@@ -421,12 +510,7 @@ class TextListener(Listener):
         return True
           
     def process(self, text):
-        return simple_twitter_parser.preprocess(text, return_text=True, numbers=True, mentions=False, stop_words=False, hashtag=True)
-
-        #text = text.replace('\t', ' ').replace('\n', ' ')
-        ##text = ' '.join(re.sub("(@[A-Za-z0-9]+)|(&[A-Za-z]+;)|(#[A-Za-z0-9]+)|([^0-9A-Za-z \t])|(\w+:\/\/\S+)"," ",text).split())
-        #text = ' '.join(re.sub("(@[A-Za-z0-9]+)|(&[A-Za-z]+;)|([^0-9A-Za-z# \t])|(\w+:\/\/\S+)"," ",text).split())
-        #return text.lower().strip()
+        return preprocess(text, return_text=True, numbers=True, mentions=False, stop_words=False, hashtag=True)
         
         
 #%%        
@@ -439,45 +523,13 @@ def memory_usage_psutil():
     process = psutil.Process(os.getpid())
     mem = process.memory_info().rss #[0] / float(2 ** 20)
     return mem
-    
-k = 20
-maxB = 50  # should be less than 0.5 of max_docs/(2^k)
-tables = 64
-epsilon=0.55
-#%%
-max_threads = 1000
-max_docs = 100
 
-#%%
-#mongodb
-host = 'localhost' #'192.168.1.100'
-port = 27017
-db = 'events2012'#'petrovic'
-collection = 'posts' #'relevance_judgments'
-#db = 'test'
-#collection = 'test'
 
-min_rounds = 0
-max_rounds = 10
-
-import sys
-if len(sys.argv)>1:
-    max_docs = int(sys.argv[1])
-
-if len(sys.argv)>2:
-    min_rounds = int(sys.argv[2])
-    max_rounds = int(sys.argv[3])
-    
-preformance_file = 'c:/temp/performance-{}.txt'.format(max_docs)
-file = open(preformance_file, 'a')
-file.write('max_docs\tseconds\tminutes\tusage\n')
-
-for r in range(min_rounds, max_rounds):
+def init_mongodb(k, maxB, tables, epsilon, max_docs, page):
     print('Running LSH with {0} tweets ..... '.format(max_docs), end='')
 
     
-    log_filename = 'c:/temp/{0:07d}_docs_round_{1:02d}.log'.format(max_docs, r)
-    threads_filename = 'c:/temp/{0:07d}_docs_round_{1:02d}_threads.txt'.format(max_docs, r)
+    log_filename = 'c:/temp/{0:07d}_docs_round_{1:02d}.log'.format(max_docs, page)
     
     #%%
     logger = simplelogger()
@@ -485,58 +537,97 @@ for r in range(min_rounds, max_rounds):
     #logger.init(filename=log_filename, std_level=simplelogger.INFO, file_level=simplelogger.DEBUG, profiling=False)
     
     #%%
-    start = time.time()
     lshmodel = NED_LSH_model()
     lshmodel.init( logger, k, tables, max_bucket_size=maxB, dimension=3, epsilon=epsilon)
     
+
+    
+    return lshmodel
+    
+def execute(lshmodel, page, max_docs, host, port, db, collection, max_threads):
+    preformance_file = 'c:/temp/performance-{}.txt'.format(max_docs)
+    file = open(preformance_file, 'a')
+    file.write('max_docs\tseconds\tminutes\tusage\n')
+
+    starttime = time.time()
     
     #streamer = TextStreamer(logger)
     #streamer.init('C:\data\_Personal\DataScientist\datasets\Italy1.json')
     
-    streamer = MongoDBStreamer(logger)
-    streamer.init(host, port, db, collection, offset=int(r*max_docs/2))
+    streamer = MongoDBStreamer(lshmodel.logger)
+    streamer.init(host, port, db, collection, offset=int(page*max_docs))
     
-    listener = TextListener(logger)
+    listener = TextListener(lshmodel.logger)
     listener.init(lshmodel, max_docs)
     
     streamer.register(listener)
     streamer.start()
     
     nn = len(listener.text_data)
-    logger.info('Loaded {} text documents.'.format(nn))
+    lshmodel.logger.info('Loaded {} text documents.'.format(nn))
     
     #%%
+    threads_filename = 'c:/temp/{0:07d}_docs_round_{1:02d}_threads.txt'.format(max_docs, page)
         
-    _thr = lshmodel.dumpThreads(threads_filename.replace('.txt', '1.txt'), max_threads)
-    _thr = lshmodel.dumpThreads2(threads_filename.replace('.txt', '2.txt'), max_threads)
-    _thr = lshmodel.dumpThreads3(threads_filename.replace('.txt', '3.txt'), max_threads)
+    lshmodel.dumpThreads(threads_filename.replace('.txt', '1.txt'), max_threads)
+    lshmodel.dumpThreads2(threads_filename.replace('.txt', '2.txt'), max_threads)
+    lshmodel.dumpThreads3(threads_filename.replace('.txt', '3.txt'), max_threads)
+    #print ( lshmodel.jsonify(max_threads) )
 
-    logger.info('print profiling!')
+    lshmodel.logger.info('print profiling!')
     
-    logger.profiling_dump()
+    lshmodel.logger.profiling_dump()
     
-    measured_time = time.time() - start
+    measured_time = time.time() - starttime
     
     usage_psutil = memory_usage_psutil()
 
-    logger.info('done with {0:.2f} seconds (= {1:.2f} minutes). usage: {2}'.format(measured_time, measured_time/60, usage_psutil))
+    lshmodel.logger.info('done with {0:.2f} seconds (= {1:.2f} minutes). usage: {2}'.format(measured_time, measured_time/60, usage_psutil))
     file.write('{0}\t{1}\t{2}\t{3}\n'.format(max_docs, measured_time, measured_time/60, usage_psutil))
-    #%%
-    #print (type(listener.text_data))
-    #
-    #print (listener.text_data[5])
-    #print (lshmodel.counts[5, :])
-    #print (lshmodel.count_vect.get_feature_names()[572])
-    
-    #lshmodel.lsh.myprint()
-    
-    
-    
         
     #%%
-    logger.info('Done.')
-    logger.close()
+    lshmodel.logger.info('Done.')
+    lshmodel.logger.close()
 
     #input('Round {} is done. Press Enter...'.format(r))
+    
+    file.close()
+    return lshmodel
 
-file.close()
+
+if __name__ == '__main__':
+    
+    k = 13
+    maxB = 500  # should be less than 0.5 of max_docs/(2^k)
+    tables = 64
+    epsilon = 0.5
+    #%%
+    max_threads = 2000
+    max_docs = 10
+    
+    #%%
+    #mongodb
+    host = 'localhost' #'192.168.1.100' #'localhost' 
+    port = 27017
+    db = 'test' # 'events2012'#'petrovic'
+    collection = 'test' #'posts' #'relevance_judgments'
+    #db = 'test'
+    #collection = 'test'
+    
+    min_rounds = 0
+    max_rounds = 10
+    page = 0
+
+
+    import sys
+    if len(sys.argv)>1:
+        max_docs = int(sys.argv[1])
+    
+    if len(sys.argv)>2:
+        min_rounds = int(sys.argv[2])
+        max_rounds = int(sys.argv[3])
+
+    
+    lshmodel = init_mongodb(k, maxB, tables, epsilon, max_docs, page)
+    execute(lshmodel, page, max_docs, host, port, db, collection, max_threads)
+

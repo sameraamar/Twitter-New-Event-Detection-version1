@@ -20,7 +20,10 @@ class FuncThread(threading.Thread):
         
     def run(self):
         assert( self._target!= None )
-        self.results = self._target(*self._args[0])
+        if self._args != None and len(self._args)>0:
+            self.results = self._target(*self._args[0])
+        else:
+            self.results = self._target()
         
 #    def run_all_debug(func):
 #        results = []
@@ -32,6 +35,24 @@ class FuncThread(threading.Thread):
 #            results.append(res)
 #            
 #        return results
+
+def run_bg(func):
+    threads = []
+
+    for i in range(len(func)):
+        f = func[i]
+        param = None
+        if len(f) > 1:
+            param = f[1:]
+        f = f[0]
+        if param != None:
+            t = FuncThread(f, param)
+        else:
+            t = FuncThread(f)
+
+        t.start()
+        threads.append(t)
+    return threads
     
 def run_all(func, debugging=False):
 #        if debugging:

@@ -81,12 +81,15 @@ def preprocess(s, lowercase=True, emoicons=False, numbers=False, mentions=False,
             continue
         if html_re.search(token):
             continue
+        if token == 'rt' or token == 'RT' and len(tmp)==0:
+            continue
         
         tmp.append(token)
     tokens = tmp
     
     if return_text:
-        return ' '.join(tokens)
+        res = ' '.join(tokens)
+        return res.strip()
     
     return tokens
 
@@ -99,3 +102,9 @@ if __name__ == '__main__':
     print(preprocess(tweet, lowercase=False, numbers=True, return_text=True, emoicons=True, mentions=True, url=True, hashtag=True, punctuation=True, stop_words=True))
     print(preprocess(tweet, return_text=True, mentions=False, stop_words=False, hashtag=True))
     
+
+    
+        #text = text.replace('\t', ' ').replace('\n', ' ')
+        ##text = ' '.join(re.sub("(@[A-Za-z0-9]+)|(&[A-Za-z]+;)|(#[A-Za-z0-9]+)|([^0-9A-Za-z \t])|(\w+:\/\/\S+)"," ",text).split())
+        #text = ' '.join(re.sub("(@[A-Za-z0-9]+)|(&[A-Za-z]+;)|([^0-9A-Za-z# \t])|(\w+:\/\/\S+)"," ",text).split())
+        #return text.lower().strip()    

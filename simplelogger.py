@@ -6,7 +6,7 @@ Created on Sun Oct 23 14:01:57 2016
 """
 from datetime import datetime
 import sys
-import numpy as np
+#import numpy as np
 import threading
 
 class simplelogger:
@@ -22,7 +22,7 @@ class simplelogger:
     profiling_res = {}
     helper = {}
 
-    def init(self, filename=None, std_level=INFO, file_level=DEBUG, profiling=False):
+    def init(self, filename=None, std_level=INFO, file_level=DEBUG, profiling=False, bufsize = 10):
         self.loglevels = [std_level, file_level]
 
         self.profiling_res = {}
@@ -129,6 +129,6 @@ class simplelogger:
         
     def close(self):
         if self.handlers[1] != None:
-            self.handlers[1].close()
+            self.handlers[1].flush() #.close()
             
 
