@@ -23,7 +23,8 @@ class NED_LSH_model:
     dimension = 0
     max_bucket_size = 0
     logger = None
-    epsilon = 0
+    threshold = 0
+    resent_documents = 0 
     
     #%%
     threads_queue = {}
@@ -34,15 +35,16 @@ class NED_LSH_model:
     id_list = []
     text_metadata = {}
     first_timestamp = None
-    last_timestamp = None        
+    last_timestamp = None       
 
 
     #'''
     counts = None
     count_vect = None
 
-    def init(self, logger, hyper_planes, tables, max_bucket_size=50, dimension=3, epsilon=0.5):
+    def init(self, logger, hyper_planes, tables, max_bucket_size=50, dimension=3, threshold=0.5, resent_documents=10000):
         self.logger = logger
+        self.resent_documents = resent_documents
         self.hyper_planes = hyper_planes
         self.tables = tables
         self.max_bucket_size = max_bucket_size
@@ -53,7 +55,7 @@ class NED_LSH_model:
         self.id_list = []
         self.text_metadata = {}
         self.dimension = dimension
-        self.epsilon = epsilon
+        self.threshold = threshold
         self.threads = {}
         self.threads_queue = {}
         self.first_timestamp = None
@@ -74,6 +76,7 @@ class NED_LSH_model:
         self.tweet2thread = {}
         self.first_timestamp = None
         self.last_timestamp = None
+        self.resent = []
         
         self.count_vect = CountVectorizer() #stop_words='english')
         self.counts = self.count_vect.fit_transform(text_data)
@@ -108,18 +111,43 @@ class NED_LSH_model:
             if self.last_timestamp == None or self.last_timestamp < data['timestamp']:
                 self.last_timestamp = data['timestamp']
 
-            if nearestDist == None or nearestDist < self.epsilon:
+            if nearestDist == None or nearestDist > self.threshold:
+                #compare d to a fixed number of most recent documents
+                flag = False
+                for other in self.resent:
+                    tmp = self.lsh.helper.angular_distance(ID, other, doc, self.counts[self.doc_indices[other], :])
+                    if nearestDist == None or nearestDist > tmp:
+                        nearestDist = tmp
+                        nearest = {'ID' : other}
+                        flag = True
+                if flag: #found a new neighbor
+                    self.logger.debug('*** CANDIDATE OF NEW THREAD ***: {0} ("{1}") was found as close to {2} ("{3}") distance {4}.'.format(ID, nearest['ID'], self.text_metadata[ID]['text'], self.text_metadata.get(other, ''), tmp))
+                        
+            nearestID = None
+            if nearest != None:
+                nearestID = nearest['ID']
+
+            if nearestDist == None or nearestDist > self.threshold:
                 self.threads[ID] = [ID]
                 self.tweet2thread[ID] = ID
                 self.threads_queue[ID] = TweetThread(ID, doc, data['user'], data['timestamp'])
+                self.logger.debug('*** NEW THREAD ***: leader is {0} ("{3}"). Nearest is {1} ("{4}") with distance {2}.'.format(ID, nearestID, nearestDist, self.text_metadata[ID]['text'], self.text_metadata.get(nearestID, '')))
+
+                
 
             else:
-                nearID = nearest['ID']
-                nearThreadID = self.tweet2thread[nearID]
+                nearThreadID = self.tweet2thread[nearestID]
                 self.threads[nearThreadID].append(ID)
-                self.threads_queue[nearThreadID].append(ID, doc, data['user'], data['timestamp'], nearID, nearestDist)
+                self.threads_queue[nearThreadID].append(ID, doc, data['user'], data['timestamp'], nearestID, nearestDist)
                 self.tweet2thread[ID] = nearThreadID
+                self.logger.debug('*** EXISTING THREAD ***: Add document {0} ("{1}") to existing thread {2} ("{3}"). Nearest document is {4} ("{5}") with distance {6}.'.format(ID, self.text_metadata[ID]['text'], nearThreadID, self.text_metadata[nearThreadID]['text'], nearestID, self.text_metadata.get(nearestID, ''), nearestDist))
             
+            self.logger.entry('NED_LSH_model.run.resent-docs')
+            self.resent.append(ID)
+            if len(self.resent) > self.resent_documents:
+                self.resent = self.resent[1:]
+            self.logger.exit('NED_LSH_model.run.resent-docs')
+
             comparisons_all += comparisons
             
             if (sample % block == 0):
@@ -346,10 +374,15 @@ class Listener:
         return True
 
 class Action:
-    listeners = []
+    listeners = [] 
     logger = None
-    
+
+    def __init__(self):
+        self.listeners = []
+        self.logger = None
+
     def __init__(self, logger):
+        self.listeners = []
         self.logger = logger
         
     def register(self, listener):
@@ -366,6 +399,7 @@ class TextStreamer(Action):
     source = None
 
     def init(self, filename):
+        super(self.__class__, self).__init__()
         self.source = open(filename, 'r')
  
     def start(self):
@@ -396,12 +430,19 @@ import pymongo
      
 
 class MongoDBStreamer(Action):
+    client = None
     dbcoll = None
     offset = 0
 
+    def __init__(self, logger):
+        super(self.__class__, self).__init__(logger)
+        self.dbcoll = None
+        self.client = None
+        self.offset = 0
+
     def init(self, host, port, dbname, collname, offset):
-        client = MongoClient(host, int(port))
-        db = client[dbname]
+        self.client = MongoClient(host, int(port))
+        db = self.client[dbname]
         self.dbcoll = db[collname]
         self.offset = offset
  
@@ -525,20 +566,20 @@ def memory_usage_psutil():
     return mem
 
 
-def init_mongodb(k, maxB, tables, epsilon, max_docs, page):
+def init_mongodb(k, maxB, tables, threshold, max_docs, page, resent_documents):
     print('Running LSH with {0} tweets ..... '.format(max_docs), end='')
 
     
-    log_filename = 'c:/temp/{0:07d}_docs_round_{1:02d}.log'.format(max_docs, page)
+    log_filename = 'c:/temp/{0:07d}_docs_round_{1:03d}.log'.format(max_docs, page)
     
     #%%
     logger = simplelogger()
-    logger.init(filename=log_filename, std_level=simplelogger.INFO, file_level=simplelogger.INFO, profiling=False)
+    logger.init(filename=log_filename, std_level=simplelogger.INFO, file_level=simplelogger.DEBUG, profiling=True)
     #logger.init(filename=log_filename, std_level=simplelogger.INFO, file_level=simplelogger.DEBUG, profiling=False)
     
     #%%
     lshmodel = NED_LSH_model()
-    lshmodel.init( logger, k, tables, max_bucket_size=maxB, dimension=3, epsilon=epsilon)
+    lshmodel.init( logger, k, tables, max_bucket_size=maxB, dimension=3, threshold=threshold, resent_documents=resent_documents)
     
 
     
@@ -600,7 +641,7 @@ if __name__ == '__main__':
     k = 13
     maxB = 500  # should be less than 0.5 of max_docs/(2^k)
     tables = 64
-    epsilon = 0.5
+    threshold = 0.5
     #%%
     max_threads = 2000
     max_docs = 10
@@ -628,6 +669,6 @@ if __name__ == '__main__':
         max_rounds = int(sys.argv[3])
 
     
-    lshmodel = init_mongodb(k, maxB, tables, epsilon, max_docs, page)
+    lshmodel = init_mongodb(k, maxB, tables, threshold, max_docs, page, 10)
     execute(lshmodel, page, max_docs, host, port, db, collection, max_threads)
 

@@ -12,7 +12,7 @@ from scipy import stats
 import numpy as np
 import multirun
 
-
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 def debug(logger, message):
@@ -134,14 +134,6 @@ class MathHelper:
         res = self.angular_distance(id1, id2, a, b)
         return res
         
-    #    base = time.time()
-    #    #a= a.toarray()
-    #    #b = b.toarray()
-    #    res = spatial.distance.cosine(a, b)
-    #    return res
-    
-    # angular similarity using definitions
-    # http://en.wikipedia.org/wiki/Cosine_similarity
     def angular_distance(self, id1, id2, a,b):
         key1 = '{0}-{1}'.format(id1, id2)
         key2 = '{1}-{0}'.format(id1, id2)
@@ -153,11 +145,36 @@ class MathHelper:
             self.logger.debug('Pingo: {0}-{1} = {2}'.format(id1, id2, cache_dist))
             return cache_dist
         
-        m = 0
-        nonzeros = np.nonzero(a)
-        if nonzeros != None:
-            for i in nonzeros[1]:
-                m += a[0, i]*b[0, i]
+        dist = 1-cosine_similarity(a, b)[0][0]
+        cache_values[key1] = dist
+
+        return dist
+  
+
+    #    base = time.time()
+    #    #a= a.toarray()
+    #    #b = b.toarray()
+    #    res = spatial.distance.cosine(a, b)
+    #    return res
+    
+    # angular similarity using definitions
+    # http://en.wikipedia.org/wiki/Cosine_similarity
+    def angular_distance2(self, id1, id2, a,b):
+        key1 = '{0}-{1}'.format(id1, id2)
+        key2 = '{1}-{0}'.format(id1, id2)
+        
+        global cache_values
+        
+        cache_dist = cache_values.get(key1, cache_values.get(key2, None))
+        if cache_dist != None:
+            self.logger.debug('Pingo: {0}-{1} = {2}'.format(id1, id2, cache_dist))
+            return cache_dist
+        
+        #m = 0
+        #nonzeros = np.nonzero(a)
+        #if nonzeros != None:
+        #    for i in nonzeros[1]:
+        #        m += a[0, i]*b[0, i]
     
         dot_prod = self.dotProduct(id1, id2, a, b) #a.dot(b)[0,0]
         
@@ -187,7 +204,7 @@ class MathHelper:
             else:
                 print ('more than 1')
                 
-            print (cache_values)
+            #print (cache_values)
             raise Exception("Error!")
         
         dist = (theta/math.pi)
@@ -238,8 +255,9 @@ class HashtableLSH:
                 continue
             p1 = item['point']
             p2 = neighbor['point']
-
-            dist = 1.0-self.helper.distance_cosine(item['ID'], neighbor['ID'], p1, p2)
+            #samer: rename the following to similarity OR remove '1-' from this. I chose to remove the '1-' and keep it
+            #as distance value rather than similarity value
+            dist = self.helper.distance_cosine(item['ID'], neighbor['ID'], p1, p2)
             if minDist == None or dist < minDist:
                 minDist = dist
                 nearest = neighbor
@@ -248,6 +266,40 @@ class HashtableLSH:
         return nearest, minDist, bucket_size
 
     def generateHashCode(self, point, id1):
+        code1 = self.generateHashCode1(point, id1)
+        code2 = self.generateHashCode2(point, id1)
+        return code1
+
+    def generateHashCode1(self, point, id1):
+        self.logger.entry('HashtableLSH.generateHashCode1')
+
+        nonzeros = np.nonzero(point)
+        temp_hashcode = ''
+        for i in range(self.hyperPlanesNumber):
+            d = 0
+            for j in nonzeros[1]:
+                d += self.hyperPlanes[j, i]* point[0,j]
+
+            temp_hashcode += '0' if d<0 else '1'
+        self.logger.exit("HashtableLSH.generateHashCode1")
+        return ([], temp_hashcode)
+
+    def generateHashCode2(self, point, id1):
+        self.logger.entry("HashtableLSH.generateHashCode2")
+
+        hashcode = point.dot(self.hyperPlanes)
+        hashcode[hashcode < 0] = 0
+        hashcode[hashcode > 0] = 1
+            
+        hashcode.eliminate_zeros()
+
+        temp_hashcode = hashcode.A.astype('S1').tostring().decode('utf-8')
+
+        self.logger.exit("HashtableLSH.generateHashCode2")
+        return ([], temp_hashcode)
+
+
+    def generateHashCode11(self, point, id1):
         self.logger.entry('HashtableLSH.generateHashCode')
         
         if id1==None or len(self.doc_indices)==0:
@@ -468,9 +520,9 @@ class LSH:
         self.logger.entry('LSH.add_all')        
         invokes = []
         for table in self.hList:
-            invokes.append( (table.add_all, doc_indices, points) )
-            #table.add_all(doc_indices, points)
-        multirun.run_all(invokes)
+            #invokes.append( (table.add_all, doc_indices, points) )
+            table.add_all(doc_indices, points)
+        #multirun.run_all(invokes)
         self.logger.entry('LSH.add_all')        
 
 #    def add_all2(self, doc_indices, points, id_list):
@@ -585,8 +637,6 @@ class LSH:
 
 from simplelogger import simplelogger 
 from time import time
-from sklearn.metrics.pairwise import cosine_similarity
-
 
 if __name__ == '__main__':
     logger = simplelogger()
@@ -596,42 +646,15 @@ if __name__ == '__main__':
     
     h = MathHelper(logger=logger)
     p1 = h.randomPoint(dim)
-    
-    p1[0, 0] = 0   
-    p1[0, 1] = 2  
-    p1[0, 2] = 0
-
     p2 = h.randomPoint(dim)
-    p2[0, 0] = 2   
-    p2[0, 1] = 222
-    p2[0, 2] = 3
-
     
-    print (p1)
-    print (p2)
     res = h.angular_distance("ID1", "ID2", p1, p2)
-    
-    print(2*res)
-    
-    similarities = cosine_similarity(p1, p2)[0][0]
-    print(1-similarities)
+    print(res)
 
 
-    from mpl_toolkits.mplot3d import Axes3D
-    import matplotlib.pyplot as plt
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    ax.scatter(p1, p2, c='r', marker='o')
-
-    ax.set_xlabel('X Label')
-    ax.set_ylabel('Y Label')
-    ax.set_zlabel('Z Label')
-
-    plt.show()
-    
 if False and __name__ == '__main__':  
-  
-
+    from simplelogger import simplelogger 
+    from time import time
     
     def init_log():
         #logging.config.fileConfig('logging.conf')
@@ -681,7 +704,6 @@ if False and __name__ == '__main__':
     
         ll.myprint()
      
-        
         return ll
     
     
@@ -725,3 +747,4 @@ if False and __name__ == '__main__':
 #    print S, S.getnnz()
     
     logger.close()
+
