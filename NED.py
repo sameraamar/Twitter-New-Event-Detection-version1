@@ -574,7 +574,7 @@ def init_mongodb(k, maxB, tables, threshold, max_docs, page, resent_documents):
     
     #%%
     logger = simplelogger()
-    logger.init(filename=log_filename, std_level=simplelogger.INFO, file_level=simplelogger.INFO, profiling=False)
+    logger.init(filename=log_filename, std_level=simplelogger.INFO, file_level=simplelogger.DEBUG, profiling=True)
     #logger.init(filename=log_filename, std_level=simplelogger.INFO, file_level=simplelogger.DEBUG, profiling=False)
     
     #%%

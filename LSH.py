@@ -269,6 +269,40 @@ class HashtableLSH:
         return nearest, minDist, bucket_size
 
     def generateHashCode(self, point, id1):
+        code1 = self.generateHashCode1(point, id1)
+        code2 = self.generateHashCode2(point, id1)
+        return code1
+
+    def generateHashCode1(self, point, id1):
+        self.logger.entry('HashtableLSH.generateHashCode1')
+
+        nonzeros = np.nonzero(point)
+        temp_hashcode = ''
+        for i in range(self.hyperPlanesNumber):
+            d = 0
+            for j in nonzeros[1]:
+                d += self.hyperPlanes[j, i]* point[0,j]
+
+            temp_hashcode += '0' if d<0 else '1'
+        self.logger.exit("HashtableLSH.generateHashCode1")
+        return ([], temp_hashcode)
+
+    def generateHashCode2(self, point, id1):
+        self.logger.entry("HashtableLSH.generateHashCode2")
+
+        hashcode = point.dot(self.hyperPlanes)
+        hashcode[hashcode < 0] = 0
+        hashcode[hashcode > 0] = 1
+            
+        hashcode.eliminate_zeros()
+
+        temp_hashcode = hashcode.A.astype('S1').tostring().decode('utf-8')
+
+        self.logger.exit("HashtableLSH.generateHashCode2")
+        return ([], temp_hashcode)
+
+
+    def generateHashCode11(self, point, id1):
         self.logger.entry('HashtableLSH.generateHashCode')
         
         if id1==None or len(self.doc_indices)==0:
