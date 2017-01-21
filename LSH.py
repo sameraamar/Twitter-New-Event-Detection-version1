@@ -131,6 +131,9 @@ class MathHelper:
         return res
     
     def distance_cosine(self, id1, id2, a,b):
+        
+
+
         res = self.angular_distance(id1, id2, a, b)
         return res
         
@@ -653,6 +656,9 @@ if __name__ == '__main__':
 
 
 if False and __name__ == '__main__':  
+  
+
+
     from simplelogger import simplelogger 
     from time import time
     
@@ -704,6 +710,7 @@ if False and __name__ == '__main__':
     
         ll.myprint()
      
+        
         return ll
     
     
@@ -747,4 +754,5 @@ if False and __name__ == '__main__':
 #    print S, S.getnnz()
     
     logger.close()
+
 
